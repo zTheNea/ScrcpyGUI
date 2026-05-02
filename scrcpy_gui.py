@@ -146,8 +146,13 @@ class ScrcpyGUI(ctk.CTk):
             self.scrcpy_status.configure(text=f"✅ scrcpy {ver or 'instalado'} — {os.path.dirname(path)}", text_color=COLORS["green"])
             self.btn_download.pack_forget()
         else:
-            self.scrcpy_status.configure(text="❌ scrcpy no encontrado", text_color=COLORS["danger"])
-            self.btn_check.pack_forget()
+            if mgr.IS_WINDOWS:
+                self.scrcpy_status.configure(text="❌ scrcpy no encontrado", text_color=COLORS["danger"])
+                self.btn_check.pack_forget()
+            else:
+                self.scrcpy_status.configure(text="❌ scrcpy no instalado. Instálalo con: sudo apt install scrcpy", text_color=COLORS["danger"])
+                self.btn_download.pack_forget()
+                self.btn_check.pack_forget()
 
     def _check_update(self):
         self.scrcpy_status.configure(text="🔍 Buscando actualizaciones...", text_color=COLORS["orange"])
@@ -213,7 +218,8 @@ class ScrcpyGUI(ctk.CTk):
             scrcpy_path = mgr.get_scrcpy_path()
             adb = shutil.which("adb")
             if not adb and scrcpy_path:
-                adb = os.path.join(os.path.dirname(scrcpy_path), "adb.exe")
+                ext = ".exe" if mgr.IS_WINDOWS else ""
+                adb = os.path.join(os.path.dirname(scrcpy_path), f"adb{ext}")
             if adb and os.path.isfile(adb):
                 r = subprocess.run([adb, "devices"], capture_output=True, text=True, timeout=5)
                 lines = [l for l in r.stdout.strip().split("\n")[1:] if l.strip() and "device" in l]
@@ -399,7 +405,16 @@ class ScrcpyGUI(ctk.CTk):
         self.btn_launch.pack_forget(); self.btn_stop.pack(fill="x", pady=(0, 4), before=self.log_box)
         def run():
             try:
-                self.process = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=os.path.dirname(scrcpy_path), creationflags=subprocess.CREATE_NO_WINDOW)
+                kwargs = {
+                    "stdout": subprocess.PIPE,
+                    "stderr": subprocess.STDOUT,
+                    "text": True,
+                    "cwd": os.path.dirname(scrcpy_path)
+                }
+                if mgr.IS_WINDOWS:
+                    kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+                
+                self.process = subprocess.Popen(args, **kwargs)
                 for line in self.process.stdout: self.after(0, self._log, line.rstrip())
                 self.process.wait()
                 self.after(0, self._log, f"⏹ scrcpy terminó (código {self.process.returncode})")
