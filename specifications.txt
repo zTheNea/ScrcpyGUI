@@ -1,0 +1,35 @@
+ScrcpyGUI - Especificaciones Técnicas y Herramientas
+==================================================
+
+1. RESUMEN DEL PROGRAMA
+ScrcpyGUI es una aplicación de escritorio para Windows que actúa como una capa gráfica (GUI) para el motor scrcpy. Su objetivo es facilitar la conexión, configuración y optimización del espejado de dispositivos Android en PC.
+
+2. HERRAMIENTAS UTILIZADAS
+- Lenguaje: Python 3.14.3
+- Interfaz Gráfica: CustomTkinter (basado en Tkinter con diseño moderno)
+- Motor de Espejado: scrcpy v2.0+ (Auto-descargable)
+- Control de Dispositivos: ADB (incluido en el paquete de scrcpy)
+- Compilación: PyInstaller (Generación de ejecutable .exe)
+- Gestión de Versiones: Git
+
+3. FUNCIONALIDADES CLAVE
+- Actualizador Automático: Verifica la última versión de scrcpy en GitHub y la instala si es necesario.
+- Selector de Modos (Presets):
+    * Cinema: 2560px, H265, 24Mbps, 60fps (Ideal para ver videos).
+    * Pro Gaming: 1024px, H264, 12Mbps, 120fps, Input HID (Teclado/Ratón físico).
+    * Equilibrado: 1440px, H265, 10Mbps, 60fps (Uso general).
+    * Ultra (AV1): Resolución Nativa, AV1, 32Mbps, 144fps (Soporte para hardware moderno).
+- Ajustes Rápidos: Interruptores para apagar pantalla y mantener el dispositivo despierto.
+- Terminal de Logs: Caja de texto que muestra la salida del proceso scrcpy en tiempo real.
+- Panel Personalizado: Edición manual de cada argumento de línea de comandos de scrcpy.
+
+4. ESTRUCTURA DE ARCHIVOS
+- scrcpy_gui.py: Código fuente principal (UI y lógica).
+- scrcpy_manager.py: Lógica de red, descargas y manejo de archivos scrcpy.
+- ScrcpyGUI.spec: Configuración para la creación del ejecutable.
+- README.md: Documentación visual para GitHub.
+- .gitignore: Archivos excluidos del control de versiones.
+
+5. VERSIONAMIENTO
+- Punto de partida: v1.0.0 (Versión Limpia y Optimizada).
+- Próximos pasos: Implementar sistema de tags en GitHub para cada release.
