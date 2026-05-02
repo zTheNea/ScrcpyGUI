@@ -1,5 +1,5 @@
 """Manages scrcpy download, detection and updates from GitHub."""
-import os, json, shutil, zipfile, urllib.request, threading, platform
+import os, json, shutil, zipfile, urllib.request, threading, platform, ssl
 
 GITHUB_API = "https://api.github.com/repos/Genymobile/scrcpy/releases/latest"
 
@@ -42,12 +42,19 @@ def _save_version(ver, url):
     with open(VERSION_FILE, "w") as f:
         json.dump({"version": ver, "url": url}, f)
 
+def get_ssl_context():
+    """Create a context that ignores certificate verification errors if needed."""
+    try:
+        return ssl._create_unverified_context()
+    except AttributeError:
+        return None
+
 def check_latest(callback):
     """Check GitHub for latest release. Calls callback(tag, download_url, error)."""
     def run():
         try:
             req = urllib.request.Request(GITHUB_API, headers={"User-Agent": "ScrcpyGUI"})
-            with urllib.request.urlopen(req, timeout=10) as r:
+            with urllib.request.urlopen(req, timeout=10, context=get_ssl_context()) as r:
                 data = json.loads(r.read().decode())
             tag = data.get("tag_name", "")
             url = ""
@@ -77,7 +84,7 @@ def download_and_install(url, progress_cb=None, done_cb=None):
             zip_path = os.path.join(APP_DIR, "scrcpy_download.zip")
             # Download
             req = urllib.request.Request(url, headers={"User-Agent": "ScrcpyGUI"})
-            with urllib.request.urlopen(req, timeout=120) as r:
+            with urllib.request.urlopen(req, timeout=120, context=get_ssl_context()) as r:
                 total = int(r.headers.get("Content-Length", 0))
                 downloaded = 0
                 with open(zip_path, "wb") as f:
