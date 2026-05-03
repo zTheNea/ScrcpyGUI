@@ -108,6 +108,8 @@ class ScrcpyGUI(ctk.CTk):
         self.v_always_on_top = ctk.BooleanVar(value=False)
         self.v_borderless = ctk.BooleanVar(value=False)
         self.v_window_title = ctk.StringVar(value="Scrcpy Mirror")
+        self.v_virtual_display = ctk.BooleanVar(value=False)
+        self.v_virtual_display_res = ctk.StringVar(value="1920x1080")
 
         self._build_ui()
         self._update_command()
@@ -293,6 +295,8 @@ class ScrcpyGUI(ctk.CTk):
         self._cfg_option_menu(c1, "Fuente Audio", self.v_audio_source, ["output", "mic"])
         self._cfg_option_menu(c1, "Codec Audio", self.v_audio_codec, ["opus", "aac", "raw"])
         self._cfg_slider(c1, "Buffer audio (ms)", self.v_audio_buf, 0, 500)
+        self._cfg_switch(c1, "🖥️ Pantalla Virtual", self.v_virtual_display)
+        self._cfg_entry(c1, "Res. Virtual (WxH)", self.v_virtual_display_res)
         self._cfg_switch(c1, "Pantalla completa", self.v_fullscreen); self._cfg_switch(c1, "Siempre al frente", self.v_always_on_top); self._cfg_switch(c1, "Sin bordes", self.v_borderless)
         c2 = self._cfg_group(cols, "🎛️ Controles y Graba", 2)
         self._cfg_option_menu(c2, "Teclado", self.v_keyboard, ["", "uhid", "aoa", "disabled"])
@@ -392,6 +396,10 @@ class ScrcpyGUI(ctk.CTk):
         if self.v_borderless.get(): args.append("--window-borderless")
         if self.v_stay_awake.get(): args.append("--stay-awake")
         if self.v_screen_off.get(): args.append("--turn-screen-off")
+        
+        if self.v_virtual_display.get():
+            res = self.v_virtual_display_res.get().strip() or "1920x1080"
+            args.append(f"--new-display={res}")
         
         kb = self.v_keyboard.get()
         if kb: args.append(f"--keyboard={kb}")
