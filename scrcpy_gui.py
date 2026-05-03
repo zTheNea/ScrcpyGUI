@@ -114,6 +114,8 @@ class ScrcpyGUI(ctk.CTk):
         self.v_camera_id = ctk.StringVar(value="0")
         self.v_camera_size = ctk.StringVar(value="")
         self.v_v4l2_device = ctk.StringVar(value="")
+        self.v_wifi_ip = ctk.StringVar(value="")
+        self.v_wifi_pair_code = ctk.StringVar(value="")
         self.v_display_id = ctk.StringVar(value="0")
 
         self._build_ui()
@@ -125,6 +127,7 @@ class ScrcpyGUI(ctk.CTk):
         self._build_header()
         self._build_updater()
         self._build_status()
+        self._build_wireless()
         self._build_modes()
         self._build_custom_panel()
         self._build_quick_settings()
@@ -502,6 +505,61 @@ class ScrcpyGUI(ctk.CTk):
     def _stop(self):
         if self.process and self.process.poll() is None: self.process.terminate(); self._log("⏹ Deteniendo scrcpy...")
 
+
+    def _build_wireless(self):
+        f = ctk.CTkFrame(self.scroll, fg_color=COLORS["card"], corner_radius=10, border_width=1, border_color=COLORS["border"])
+        f.pack(fill="x", pady=(0, 12))
+        
+        title_f = ctk.CTkFrame(f, fg_color="transparent")
+        title_f.pack(fill="x", padx=14, pady=(10, 5))
+        ctk.CTkLabel(title_f, text="🔗 Conexión Inalámbrica (ADB Wi-Fi)", font=ctk.CTkFont(size=13, weight="bold"), text_color=COLORS["accent"]).pack(side="left")
+        
+        row1 = ctk.CTkFrame(f, fg_color="transparent")
+        row1.pack(fill="x", padx=14, pady=5)
+        
+        self.e_wifi_ip = ctk.CTkEntry(row1, placeholder_text="IP:Puerto (ej: 192.168.1.10:5555)", variable=self.v_wifi_ip, width=280, height=32)
+        self.e_wifi_ip.pack(side="left", padx=(0, 10))
+        
+        ctk.CTkButton(row1, text="Conectar", width=120, height=32, fg_color=COLORS["accent"], text_color=COLORS["bg"], font=ctk.CTkFont(size=11, weight="bold"), command=self._wifi_connect).pack(side="left", padx=(0, 5))
+        ctk.CTkButton(row1, text="Pasar a Wi-Fi (USB)", width=140, height=32, fg_color="transparent", border_width=1, border_color=COLORS["border"], font=ctk.CTkFont(size=11), command=self._wifi_enable_tcpip).pack(side="left")
+
+        # Pairing Section (Hidden by default or smaller)
+        row2 = ctk.CTkFrame(f, fg_color="transparent")
+        row2.pack(fill="x", padx=14, pady=(5, 10))
+        
+        ctk.CTkLabel(row2, text="Emparejar (Android 11+):", font=ctk.CTkFont(size=11), text_color=COLORS["text2"]).pack(side="left", padx=(0, 10))
+        self.e_wifi_code = ctk.CTkEntry(row2, placeholder_text="Código", variable=self.v_wifi_pair_code, width=100, height=28)
+        self.e_wifi_code.pack(side="left", padx=(0, 10))
+        ctk.CTkButton(row2, text="Emparejar", width=100, height=28, fg_color=COLORS["purple"], font=ctk.CTkFont(size=11), command=self._wifi_pair).pack(side="left")
+
+    def _wifi_connect(self):
+        ip = self.v_wifi_ip.get().strip()
+        if not ip: self._log("⚠️ Ingresa una IP válida"); return
+        self._log(f"📡 Intentando conectar a {ip}...")
+        def run():
+            res = mgr.connect_wifi(ip)
+            self.after(0, lambda: (self._log(f"ℹ️ {res}"), self._refresh_devices()))
+        threading.Thread(target=run, daemon=True).start()
+
+    def _wifi_pair(self):
+        ip = self.v_wifi_ip.get().strip()
+        code = self.v_wifi_pair_code.get().strip()
+        if not ip or not code: self._log("⚠️ Ingresa IP:Puerto y Código"); return
+        self._log(f"🔐 Emparejando con {ip}...")
+        def run():
+            res = mgr.pair_wifi(ip, code)
+            self.after(0, lambda: (self._log(f"ℹ️ {res}"), self._refresh_devices()))
+        threading.Thread(target=run, daemon=True).start()
+
+    def _wifi_enable_tcpip(self):
+        dev = self.v_device.get().split(" (")[0]
+        if not dev or "Buscando" in dev or "Sin dispositivos" in dev:
+            self._log("⚠️ Conecta el teléfono por USB primero"); return
+        self._log(f"⚡ Activando modo TCP/IP en {dev}...")
+        def run():
+            res = mgr.enable_tcpip(dev)
+            self.after(0, lambda: (self._log(f"ℹ️ {res}. Ya puedes desconectar el USB."), self._refresh_devices()))
+        threading.Thread(target=run, daemon=True).start()
 
 if __name__ == "__main__":
     ScrcpyGUI().mainloop()

@@ -140,3 +140,42 @@ def list_devices():
     except Exception:
         return []
 
+def _get_adb_path():
+    p = get_scrcpy_path()
+    if not p: return shutil.which("adb")
+    adb = os.path.join(os.path.dirname(p), "adb.exe" if IS_WINDOWS else "adb")
+    if os.path.isfile(adb): return adb
+    return shutil.which("adb")
+
+def connect_wifi(ip):
+    """Runs adb connect ip."""
+    import subprocess
+    try:
+        adb = _get_adb_path()
+        if not adb: return "ADB no encontrado"
+        r = subprocess.run([adb, "connect", ip], capture_output=True, text=True, timeout=10)
+        return r.stdout.strip()
+    except Exception as e:
+        return str(e)
+
+def pair_wifi(ip_port, code):
+    """Runs adb pair ip:port code."""
+    import subprocess
+    try:
+        adb = _get_adb_path()
+        if not adb: return "ADB no encontrado"
+        r = subprocess.run([adb, "pair", ip_port, code], capture_output=True, text=True, timeout=15)
+        return r.stdout.strip()
+    except Exception as e:
+        return str(e)
+
+def enable_tcpip(serial):
+    """Runs adb -s serial tcpip 5555."""
+    import subprocess
+    try:
+        adb = _get_adb_path()
+        if not adb: return "ADB no encontrado"
+        r = subprocess.run([adb, "-s", serial, "tcpip", "5555"], capture_output=True, text=True, timeout=10)
+        return r.stdout.strip()
+    except Exception as e:
+        return str(e)
