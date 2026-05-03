@@ -301,7 +301,12 @@ class ScrcpyGUI(ctk.CTk):
         self._cfg_option_menu(c1, "Fuente Audio", self.v_audio_source, ["output", "mic"])
         self._cfg_option_menu(c1, "Codec Audio", self.v_audio_codec, ["opus", "aac", "raw"])
         self._cfg_slider(c1, "Buffer audio (ms)", self.v_audio_buf, 0, 500)
-        self._cfg_entry(c1, "Display ID (0=Principal)", self.v_display_id)
+        
+        f_disp = ctk.CTkFrame(c1, fg_color="transparent")
+        f_disp.pack(fill="x")
+        self._cfg_entry(f_disp, "Display ID (0=Pral)", self.v_display_id)
+        ctk.CTkButton(f_disp, text="📦 Lanzar App", height=28, fg_color=COLORS["orange"], font=ctk.CTkFont(size=11, weight="bold"), command=self._open_app_launcher).pack(fill="x", padx=10, pady=(0, 10))
+        
         self._cfg_switch(c1, "🖥️ Nueva Pantalla Virtual", self.v_virtual_display)
         self._cfg_entry(c1, "Res. Virtual (Sugerido 1280x720)", self.v_virtual_display_res)
         self.v_virtual_display_res.set("1280x720")
@@ -480,8 +485,44 @@ class ScrcpyGUI(ctk.CTk):
     def _stop(self):
         if self.process and self.process.poll() is None: self.process.terminate(); self._log("⏹ Deteniendo scrcpy...")
 
-    def _on_process_end(self):
-        self.process = None; self.btn_stop.pack_forget(); self.btn_launch.pack(fill="x", pady=(0, 4), before=self.log_box)
+    def _open_app_launcher(self):
+        dev = self.v_device.get().split(" (")[0]
+        if not dev or "Buscando" in dev or "Sin dispositivos" in dev:
+            return
+        
+        pop = ctk.CTkToplevel(self)
+        pop.title("Lanzador de Aplicaciones")
+        pop.geometry("400x500")
+        pop.attributes("-topmost", True)
+        
+        ctk.CTkLabel(pop, text="Selecciona una App para abrir en el Display " + self.v_display_id.get(), font=ctk.CTkFont(weight="bold")).pack(pady=10)
+        
+        search_v = ctk.StringVar()
+        search_e = ctk.CTkEntry(pop, placeholder_text="Buscar app...", textvariable=search_v)
+        search_e.pack(fill="x", padx=20, pady=5)
+        
+        list_frame = ctk.CTkScrollableFrame(pop)
+        list_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        apps = mgr.get_installed_apps(dev)
+        buttons = []
+
+        def filter_apps(*args):
+            query = search_v.get().lower()
+            for b in buttons:
+                if query in b.cget("text").lower(): b.pack(fill="x", pady=2)
+                else: b.pack_forget()
+
+        def launch(pkg):
+            mgr.launch_app_on_display(dev, pkg, self.v_display_id.get())
+            pop.destroy()
+
+        for pkg in apps:
+            btn = ctk.CTkButton(list_frame, text=pkg, fg_color="transparent", border_width=1, border_color=COLORS["border"], anchor="w", command=lambda p=pkg: launch(p))
+            btn.pack(fill="x", pady=2)
+            buttons.append(btn)
+        
+        search_v.trace_add("write", filter_apps)
 
 if __name__ == "__main__":
     ScrcpyGUI().mainloop()
