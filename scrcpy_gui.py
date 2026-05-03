@@ -517,8 +517,9 @@ class ScrcpyGUI(ctk.CTk):
             mgr.launch_app_on_display(dev, pkg, self.v_display_id.get())
             pop.destroy()
 
-        for pkg in apps:
-            btn = ctk.CTkButton(list_frame, text=pkg, fg_color="transparent", border_width=1, border_color=COLORS["border"], anchor="w", command=lambda p=pkg: launch(p))
+        for label, pkg in apps:
+            text = f"{label}\n({pkg})"
+            btn = ctk.CTkButton(list_frame, text=text, fg_color="transparent", border_width=1, border_color=COLORS["border"], anchor="w", font=ctk.CTkFont(size=12), command=lambda p=pkg: launch(p))
             btn.pack(fill="x", pady=2)
             buttons.append(btn)
         

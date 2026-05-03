@@ -147,14 +147,24 @@ def _get_adb_path():
     return shutil.which("adb")
 
 def get_installed_apps(serial):
-    """Returns a list of package names for user-installed apps."""
+    """Returns a list of (label, package) for user-installed apps."""
     import subprocess
     try:
         adb = _get_adb_path()
         if not adb: return []
-        r = subprocess.run([adb, "-s", serial, "shell", "pm", "list", "packages", "-3"], capture_output=True, text=True, timeout=5)
-        packages = [line.split(":")[1].strip() for line in r.stdout.splitlines() if ":" in line]
-        return sorted(packages)
+        # Complex shell script to get labels and packages in one go
+        cmd_script = 'for p in $(pm list packages -3 | cut -f 2 -d ":"); do label=$(dumpsys package $p | grep -m 1 "label=" | cut -f 2 -d "="); if [ -z "$label" ]; then label=$p; fi; echo "$label|$p"; done'
+        r = subprocess.run([adb, "-s", serial, "shell", cmd_script], capture_output=True, text=True, timeout=20)
+        
+        apps = []
+        for line in r.stdout.splitlines():
+            if "|" in line:
+                label, pkg = line.split("|", 1)
+                apps.append((label.strip(), pkg.strip()))
+            elif line.strip():
+                apps.append((line.strip(), line.strip()))
+        
+        return sorted(apps, key=lambda x: x[0].lower())
     except Exception:
         return []
 
