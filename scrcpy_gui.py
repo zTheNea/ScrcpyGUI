@@ -482,6 +482,9 @@ class ScrcpyGUI(ctk.CTk):
             finally: self.after(0, self._on_process_end)
         threading.Thread(target=run, daemon=True).start()
 
+    def _on_process_end(self):
+        self.process = None; self.btn_stop.pack_forget(); self.btn_launch.pack(fill="x", pady=(0, 4), before=self.log_box)
+
     def _stop(self):
         if self.process and self.process.poll() is None: self.process.terminate(); self._log("⏹ Deteniendo scrcpy...")
 
