@@ -132,10 +132,18 @@ class ScrcpyGUI(ctk.CTk):
         self._build_launch()
 
     def _build_header(self):
-        hdr = ctk.CTkFrame(self.scroll, fg_color="transparent")
-        hdr.pack(fill="x", pady=(8, 4))
-        ctk.CTkLabel(hdr, text="⎚  ScrcpyGUI", font=ctk.CTkFont(size=28, weight="bold"), text_color=COLORS["accent"]).pack()
-        ctk.CTkLabel(hdr, text="Controla tu Android desde el PC", font=ctk.CTkFont(size=13), text_color=COLORS["text2"]).pack()
+        head = ctk.CTkFrame(self, fg_color="transparent")
+        head.pack(fill="x", padx=20, pady=(20, 10))
+        
+        # Title and OS Badge
+        title_f = ctk.CTkFrame(head, fg_color="transparent")
+        title_f.pack(side="left")
+        
+        ctk.CTkLabel(title_f, text="Scrcpy", font=ctk.CTkFont(size=32, weight="bold"), text_color=COLORS["orange"]).pack(side="left")
+        ctk.CTkLabel(title_f, text="GUI", font=ctk.CTkFont(size=32, weight="bold"), text_color=COLORS["text"]).pack(side="left")
+        
+        os_name = "Windows" if mgr.IS_WINDOWS else "Linux/macOS"
+        ctk.CTkLabel(head, text=f"Sistema: {os_name}", font=ctk.CTkFont(size=10, weight="bold"), fg_color=COLORS["border"], text_color=COLORS["text2"], corner_radius=4, padx=6).pack(side="right", pady=10)
 
     def _build_updater(self):
         f = ctk.CTkFrame(self.scroll, fg_color=COLORS["card"], corner_radius=10, border_width=1, border_color=COLORS["border"])
@@ -144,14 +152,22 @@ class ScrcpyGUI(ctk.CTk):
         row.pack(fill="x", padx=14, pady=10)
         self.scrcpy_status = ctk.CTkLabel(row, text="", font=ctk.CTkFont(size=12), text_color=COLORS["text2"])
         self.scrcpy_status.pack(side="left")
+        
         self.btn_download = ctk.CTkButton(row, text="⬇️ Descargar scrcpy", width=160, height=30, font=ctk.CTkFont(size=11), fg_color=COLORS["accent"], text_color=COLORS["bg"], hover_color="#06b6d4", command=self._start_download)
-        self.btn_download.pack(side="right", padx=(8, 0))
         self.btn_check = ctk.CTkButton(row, text="🔍 Buscar actualización", width=160, height=30, font=ctk.CTkFont(size=11), fg_color=COLORS["border"], hover_color=COLORS["card_hover"], command=self._check_update)
-        self.btn_check.pack(side="right")
+        
+        if mgr.IS_WINDOWS:
+            self.btn_download.pack(side="right", padx=(8, 0))
+            self.btn_check.pack(side="right")
+        else:
+            # On Linux, only show check (manual install instruction)
+            ctk.CTkLabel(row, text="(Usa tu gestor de paquetes)", font=ctk.CTkFont(size=10), text_color=COLORS["text2"]).pack(side="right")
+
         self.dl_progress = ctk.CTkProgressBar(f, progress_color=COLORS["accent"], height=6)
         self.dl_progress.set(0)
         self.dl_progress.pack(fill="x", padx=14, pady=(0, 10))
         self.dl_progress.pack_forget()
+
         self._latest_url, self._latest_tag = "", ""
         path = mgr.get_scrcpy_path()
         ver = mgr.get_installed_version()
@@ -161,7 +177,6 @@ class ScrcpyGUI(ctk.CTk):
         else:
             if mgr.IS_WINDOWS:
                 self.scrcpy_status.configure(text="❌ scrcpy no encontrado", text_color=COLORS["danger"])
-                self.btn_check.pack_forget()
             else:
                 self.scrcpy_status.configure(text="❌ scrcpy no instalado. Instálalo con: sudo apt install scrcpy", text_color=COLORS["danger"])
                 self.btn_download.pack_forget()
@@ -307,7 +322,11 @@ class ScrcpyGUI(ctk.CTk):
         self.v_virtual_display_res.set("1280x720")
         self._cfg_switch(c1, "Pantalla completa", self.v_fullscreen); self._cfg_switch(c1, "Siempre al frente", self.v_always_on_top); self._cfg_switch(c1, "Sin bordes", self.v_borderless)
         if not mgr.IS_WINDOWS:
-            self._cfg_entry(c1, "V4L2 Sink (/dev/videoN)", self.v_v4l2_device)
+            # Linux Only Features
+            l_frame = ctk.CTkFrame(c1, fg_color=COLORS["border"], corner_radius=6)
+            l_frame.pack(fill="x", padx=10, pady=5)
+            ctk.CTkLabel(l_frame, text="🐧 Sólo Linux", font=ctk.CTkFont(size=9, weight="bold"), text_color=COLORS["accent"]).pack(pady=(2,0))
+            self._cfg_entry(l_frame, "V4L2 Sink", self.v_v4l2_device)
         c2 = self._cfg_group(cols, "🎛️ Controles y Graba", 2)
         self._cfg_option_menu(c2, "Teclado", self.v_keyboard, ["", "uhid", "aoa", "disabled"])
         self._cfg_option_menu(c2, "Ratón", self.v_mouse, ["", "uhid", "aoa", "disabled"])
