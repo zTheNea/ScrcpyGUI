@@ -102,6 +102,12 @@ class ScrcpyGUI(ctk.CTk):
         self.v_print_fps = ctk.BooleanVar(value=False)
         self.v_show_touches = ctk.BooleanVar(value=False)
         self.v_crop = ctk.StringVar(value="")
+        self.v_device = ctk.StringVar(value="")
+        self.v_audio_source = ctk.StringVar(value="output")
+        self.v_audio_codec = ctk.StringVar(value="opus")
+        self.v_always_on_top = ctk.BooleanVar(value=False)
+        self.v_borderless = ctk.BooleanVar(value=False)
+        self.v_window_title = ctk.StringVar(value="Scrcpy Mirror")
 
         self._build_ui()
         self._update_command()
@@ -204,32 +210,30 @@ class ScrcpyGUI(ctk.CTk):
         f.pack(fill="x", pady=(8, 12))
         inner = ctk.CTkFrame(f, fg_color="transparent")
         inner.pack(fill="x", padx=14, pady=10)
-        self.status_label = ctk.CTkLabel(inner, text="📱 Buscando dispositivos...", font=ctk.CTkFont(size=13), text_color=COLORS["orange"])
-        self.status_label.pack(side="left")
-        ctk.CTkButton(inner, text="🔄", width=36, height=30, fg_color="transparent", hover_color=COLORS["card_hover"], command=self._refresh_devices).pack(side="right")
-        self.after(800, self._refresh_devices)
+        ctk.CTkLabel(inner, text="📱 Dispositivo:", font=ctk.CTkFont(size=12, weight="bold"), text_color=COLORS["text2"]).pack(side="left", padx=(0, 10))
+        self.device_menu = ctk.CTkOptionMenu(inner, variable=self.v_device, values=["Buscando..."], width=300, height=32, fg_color=COLORS["bg"], button_color=COLORS["border"], dynamic_resizing=False, command=lambda _: self._update_command())
+        self.device_menu.pack(side="left")
+        ctk.CTkButton(inner, text="🔄 Refrescar", width=100, height=32, fg_color="transparent", border_width=1, border_color=COLORS["border"], font=ctk.CTkFont(size=11), hover_color=COLORS["card_hover"], command=self._refresh_devices).pack(side="right")
+        self.after(500, self._refresh_devices)
 
     def _refresh_devices(self):
-        self.status_label.configure(text="📱 Buscando...", text_color=COLORS["orange"])
+        self.device_menu.configure(values=["Buscando..."])
+        self.v_device.set("Buscando...")
         threading.Thread(target=self._check_adb, daemon=True).start()
 
     def _check_adb(self):
-        try:
-            scrcpy_path = mgr.get_scrcpy_path()
-            adb = shutil.which("adb")
-            if not adb and scrcpy_path:
-                ext = ".exe" if mgr.IS_WINDOWS else ""
-                adb = os.path.join(os.path.dirname(scrcpy_path), f"adb{ext}")
-            if adb and os.path.isfile(adb):
-                r = subprocess.run([adb, "devices"], capture_output=True, text=True, timeout=5)
-                lines = [l for l in r.stdout.strip().split("\n")[1:] if l.strip() and "device" in l]
-                if lines:
-                    dev = lines[0].split("\t")[0]
-                    self.after(0, lambda: self.status_label.configure(text=f"✅ Dispositivo conectado: {dev}", text_color=COLORS["green"]))
-                    return
-            self.after(0, lambda: self.status_label.configure(text="⚠️ Sin dispositivos — conecta vía USB o Wi-Fi", text_color=COLORS["orange"]))
-        except Exception:
-            self.after(0, lambda: self.status_label.configure(text="⚠️ No se pudo detectar dispositivos", text_color=COLORS["orange"]))
+        devs = mgr.list_devices()
+        def update():
+            if not devs:
+                self.device_menu.configure(values=["Sin dispositivos"])
+                self.v_device.set("Sin dispositivos")
+            else:
+                vals = [f"{d[0]} ({d[1]})" for d in devs]
+                self.device_menu.configure(values=vals)
+                if self.v_device.get() not in vals:
+                    self.v_device.set(vals[0])
+            self._update_command()
+        self.after(0, update)
 
     def _build_modes(self):
         ctk.CTkLabel(self.scroll, text="Selecciona un Modo", font=ctk.CTkFont(size=18, weight="bold"), text_color=COLORS["text"], anchor="w").pack(fill="x", pady=(8, 2))
@@ -285,14 +289,18 @@ class ScrcpyGUI(ctk.CTk):
         self._cfg_slider(c0, "FPS", self.v_fps, 15, 120)
         self._cfg_slider(c0, "Bitrate (Mbps)", self.v_bitrate, 1, 32)
         c1 = self._cfg_group(cols, "🔊 Audio y Pantalla", 1)
-        self._cfg_switch(c1, "Audio", self.v_audio)
-        self._cfg_slider(c1, "Buffer audio (ms)", self.v_audio_buf, 0, 500); self._cfg_slider(c1, "Buffer video (ms)", self.v_video_buf, 0, 500)
-        self._cfg_switch(c1, "Pantalla completa", self.v_fullscreen); self._cfg_switch(c1, "Mantener despierto", self.v_stay_awake); self._cfg_switch(c1, "Apagar pantalla disp.", self.v_screen_off)
-        c2 = self._cfg_group(cols, "🎛️ Controles y Extra", 2)
+        self._cfg_switch(c1, "Audio activado", self.v_audio)
+        self._cfg_option_menu(c1, "Fuente Audio", self.v_audio_source, ["output", "mic"])
+        self._cfg_option_menu(c1, "Codec Audio", self.v_audio_codec, ["opus", "aac", "raw"])
+        self._cfg_slider(c1, "Buffer audio (ms)", self.v_audio_buf, 0, 500)
+        self._cfg_switch(c1, "Pantalla completa", self.v_fullscreen); self._cfg_switch(c1, "Siempre al frente", self.v_always_on_top); self._cfg_switch(c1, "Sin bordes", self.v_borderless)
+        c2 = self._cfg_group(cols, "🎛️ Controles y Graba", 2)
         self._cfg_option_menu(c2, "Teclado", self.v_keyboard, ["", "uhid", "aoa", "disabled"])
         self._cfg_option_menu(c2, "Ratón", self.v_mouse, ["", "uhid", "aoa", "disabled"])
-        self._cfg_switch(c2, "Gamepad (UHID)", self.v_gamepad); self._cfg_switch(c2, "Grabar sesión", self.v_record)
-        self._cfg_switch(c2, "Mostrar FPS", self.v_print_fps); self._cfg_switch(c2, "Mostrar toques", self.v_show_touches)
+        self._cfg_switch(c2, "Gamepad (UHID)", self.v_gamepad)
+        self._cfg_switch(c2, "🔴 Grabar sesión", self.v_record)
+        self._cfg_entry(c2, "Archivo rec", self.v_record_file)
+        self._cfg_switch(c2, "Mostrar toques", self.v_show_touches)
         self._cfg_entry(c2, "Crop (WxH:X:Y)", self.v_crop)
 
     def _cfg_group(self, parent, title, col):
@@ -354,6 +362,11 @@ class ScrcpyGUI(ctk.CTk):
 
     def _build_args(self):
         args = []
+        # Device
+        dev = self.v_device.get().split(" (")[0]
+        if dev and "Buscando" not in dev and "Sin dispositivos" not in dev:
+            args.extend(["-s", dev])
+
         codec = self.v_codec.get(); 
         if codec and codec != "h264": args.append(f"--video-codec={codec}")
         ms = self.v_max_size.get().strip()
@@ -362,23 +375,34 @@ class ScrcpyGUI(ctk.CTk):
         if fps: args.append(f"--max-fps={fps}")
         br = self.v_bitrate.get()
         if br and br != 8: args.append(f"--video-bit-rate={br}M")
+        
         if not self.v_audio.get(): args.append("--no-audio")
         else:
+            src = self.v_audio_source.get()
+            if src != "output": args.append(f"--audio-source={src}")
+            ac = self.v_audio_codec.get()
+            if ac != "opus": args.append(f"--audio-codec={ac}")
             ab = self.v_audio_buf.get()
             if ab > 0: args.append(f"--audio-buffer={ab}")
+        
         vb = self.v_video_buf.get()
         if vb > 0: args.append(f"--video-buffer={vb}")
         if self.v_fullscreen.get(): args.append("--fullscreen")
+        if self.v_always_on_top.get(): args.append("--always-on-top")
+        if self.v_borderless.get(): args.append("--window-borderless")
         if self.v_stay_awake.get(): args.append("--stay-awake")
         if self.v_screen_off.get(): args.append("--turn-screen-off")
+        
         kb = self.v_keyboard.get()
         if kb: args.append(f"--keyboard={kb}")
         ms2 = self.v_mouse.get()
         if ms2: args.append(f"--mouse={ms2}")
         if self.v_gamepad.get(): args.append("--gamepad=uhid")
+        
         if self.v_record.get():
             rf = self.v_record_file.get().strip() or "recording.mp4"
             args.append(f"--record={rf}")
+        
         if self.v_print_fps.get(): args.append("--print-fps")
         if self.v_show_touches.get(): args.append("--show-touches")
         crop = self.v_crop.get().strip()

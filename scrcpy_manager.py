@@ -116,3 +116,26 @@ def download_and_install(url, progress_cb=None, done_cb=None):
             if done_cb:
                 done_cb(str(e))
     threading.Thread(target=run, daemon=True).start()
+
+def list_devices():
+    """Returns a list of (serial, model) for connected devices."""
+    import subprocess
+    try:
+        # Run adb devices -l to get model names
+        output = subprocess.check_output(["adb", "devices", "-l"], text=True, stderr=subprocess.STDOUT)
+        lines = output.strip().split("\n")[1:]
+        devices = []
+        for line in lines:
+            if not line.strip() or "offline" in line or "unauthorized" in line:
+                continue
+            parts = line.split()
+            serial = parts[0]
+            model = "Unknown"
+            for p in parts:
+                if p.startswith("model:"):
+                    model = p.split(":")[1]
+                    break
+            devices.append((serial, model))
+        return devices
+    except Exception:
+        return []
