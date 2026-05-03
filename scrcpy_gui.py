@@ -517,7 +517,7 @@ class ScrcpyGUI(ctk.CTk):
         row1 = ctk.CTkFrame(f, fg_color="transparent")
         row1.pack(fill="x", padx=14, pady=5)
         
-        self.e_wifi_ip = ctk.CTkEntry(row1, placeholder_text="IP:Puerto (ej: 192.168.1.10:5555)", variable=self.v_wifi_ip, width=280, height=32)
+        self.e_wifi_ip = ctk.CTkEntry(row1, placeholder_text="IP:Puerto (ej: 192.168.1.10:5555)", textvariable=self.v_wifi_ip, width=280, height=32)
         self.e_wifi_ip.pack(side="left", padx=(0, 10))
         
         ctk.CTkButton(row1, text="Conectar", width=120, height=32, fg_color=COLORS["accent"], text_color=COLORS["bg"], font=ctk.CTkFont(size=11, weight="bold"), command=self._wifi_connect).pack(side="left", padx=(0, 5))
@@ -528,7 +528,7 @@ class ScrcpyGUI(ctk.CTk):
         row2.pack(fill="x", padx=14, pady=(5, 10))
         
         ctk.CTkLabel(row2, text="Emparejar (Android 11+):", font=ctk.CTkFont(size=11), text_color=COLORS["text2"]).pack(side="left", padx=(0, 10))
-        self.e_wifi_code = ctk.CTkEntry(row2, placeholder_text="Código", variable=self.v_wifi_pair_code, width=100, height=28)
+        self.e_wifi_code = ctk.CTkEntry(row2, placeholder_text="Código", textvariable=self.v_wifi_pair_code, width=100, height=28)
         self.e_wifi_code.pack(side="left", padx=(0, 10))
         ctk.CTkButton(row2, text="Emparejar", width=100, height=28, fg_color=COLORS["purple"], font=ctk.CTkFont(size=11), command=self._wifi_pair).pack(side="left")
 
