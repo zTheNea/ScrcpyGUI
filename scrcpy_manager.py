@@ -170,12 +170,29 @@ def pair_wifi(ip_port, code):
         return str(e)
 
 def enable_tcpip(serial):
-    """Runs adb -s serial tcpip 5555."""
+    """Runs adb tcpip 5555, gets IP, and connects."""
     import subprocess
+    import re
     try:
         adb = _get_adb_path()
         if not adb: return "ADB no encontrado"
-        r = subprocess.run([adb, "-s", serial, "tcpip", "5555"], capture_output=True, text=True, timeout=10)
-        return r.stdout.strip()
+        
+        # 1. Enable TCP/IP
+        subprocess.run([adb, "-s", serial, "tcpip", "5555"], capture_output=True, text=True, timeout=10)
+        
+        # 2. Get IP address
+        r_ip = subprocess.run([adb, "-s", serial, "shell", "ip", "addr", "show", "wlan0"], capture_output=True, text=True, timeout=5)
+        ip_match = re.search(r'inet\s+(\d+\.\d+\.\d+\.\d+)', r_ip.stdout)
+        if not ip_match:
+            # Try alternative command for some devices
+            r_ip = subprocess.run([adb, "-s", serial, "shell", "ifconfig", "wlan0"], capture_output=True, text=True, timeout=5)
+            ip_match = re.search(r'inet addr:(\d+\.\d+\.\d+\.\d+)', r_ip.stdout)
+            
+        if ip_match:
+            ip = ip_match.group(1)
+            # 3. Connect
+            subprocess.run([adb, "connect", f"{ip}:5555"], capture_output=True, text=True, timeout=10)
+            return f"Conectado a {ip} vía Wi-Fi"
+        return "Modo TCP/IP activo, pero no pude obtener la IP automáticamente. Conéctate manualmente."
     except Exception as e:
         return str(e)

@@ -246,6 +246,7 @@ class ScrcpyGUI(ctk.CTk):
         self.v_device.set("Buscando...")
         threading.Thread(target=self._check_adb, daemon=True).start()
 
+
     def _check_adb(self):
         devs = mgr.list_devices()
         def update():
@@ -555,10 +556,17 @@ class ScrcpyGUI(ctk.CTk):
         dev = self.v_device.get().split(" (")[0]
         if not dev or "Buscando" in dev or "Sin dispositivos" in dev:
             self._log("⚠️ Conecta el teléfono por USB primero"); return
-        self._log(f"⚡ Activando modo TCP/IP en {dev}...")
+        self._log(f"⚡ Automatizando paso a Wi-Fi para {dev}...")
         def run():
             res = mgr.enable_tcpip(dev)
-            self.after(0, lambda: (self._log(f"ℹ️ {res}. Ya puedes desconectar el USB."), self._refresh_devices()))
+            def done():
+                self._log(f"ℹ️ {res}")
+                if "Conectado" in res:
+                    ip_part = res.split(" ")[2]
+                    self.v_wifi_ip.set(f"{ip_part}:5555")
+                    self._log("✅ Ya puedes desconectar el cable USB.")
+                self._refresh_devices()
+            self.after(0, done)
         threading.Thread(target=run, daemon=True).start()
 
 if __name__ == "__main__":
