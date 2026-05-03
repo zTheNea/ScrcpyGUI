@@ -1,5 +1,8 @@
 # 📱 ScrcpyGUI v1.2.0 - Edición Vanguardia 2026
 
+> [!IMPORTANT]
+> **Aviso Legal / Disclaimer**: ScrcpyGUI es una interfaz gráfica (GUI) independiente y no oficial diseñada para facilitar el uso de [scrcpy](https://github.com/Genymobile/scrcpy). Este proyecto es un **complemento** y no está afiliado, asociado ni respaldado por **Genymobile** ni por los desarrolladores originales de scrcpy. Todas las marcas comerciales y el motor de streaming pertenecen a sus respectivos dueños.
+
 Una interfaz gráfica profesional, ultra-rápida y optimizada para la gestión de dispositivos Android mediante `scrcpy`. Diseñada para ofrecer la máxima fidelidad visual y latencia cero.
 
 ---
