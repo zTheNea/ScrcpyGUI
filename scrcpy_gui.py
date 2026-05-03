@@ -511,27 +511,36 @@ class ScrcpyGUI(ctk.CTk):
         f = ctk.CTkFrame(self.scroll, fg_color=COLORS["card"], corner_radius=10, border_width=1, border_color=COLORS["border"])
         f.pack(fill="x", pady=(0, 12))
         
-        title_f = ctk.CTkFrame(f, fg_color="transparent")
-        title_f.pack(fill="x", padx=14, pady=(10, 5))
-        ctk.CTkLabel(title_f, text="🔗 Conexión Inalámbrica (ADB Wi-Fi)", font=ctk.CTkFont(size=13, weight="bold"), text_color=COLORS["accent"]).pack(side="left")
-        
-        row1 = ctk.CTkFrame(f, fg_color="transparent")
-        row1.pack(fill="x", padx=14, pady=5)
-        
-        self.e_wifi_ip = ctk.CTkEntry(row1, placeholder_text="IP:Puerto (ej: 192.168.1.10:5555)", textvariable=self.v_wifi_ip, width=280, height=32)
-        self.e_wifi_ip.pack(side="left", padx=(0, 10))
-        
-        ctk.CTkButton(row1, text="Conectar", width=120, height=32, fg_color=COLORS["accent"], text_color=COLORS["bg"], font=ctk.CTkFont(size=11, weight="bold"), command=self._wifi_connect).pack(side="left", padx=(0, 5))
-        ctk.CTkButton(row1, text="Pasar a Wi-Fi (USB)", width=140, height=32, fg_color="transparent", border_width=1, border_color=COLORS["border"], font=ctk.CTkFont(size=11), command=self._wifi_enable_tcpip).pack(side="left")
+        # Cabecera con descripción sutil
+        header = ctk.CTkFrame(f, fg_color="transparent")
+        header.pack(fill="x", padx=14, pady=(12, 8))
+        ctk.CTkLabel(header, text="🔗 Conexión Inalámbrica", font=ctk.CTkFont(size=14, weight="bold"), text_color=COLORS["accent"]).pack(side="left")
+        ctk.CTkLabel(header, text="(ADB over Network / Wi-Fi)", font=ctk.CTkFont(size=11), text_color=COLORS["muted"]).pack(side="left", padx=8)
 
-        # Pairing Section (Hidden by default or smaller)
-        row2 = ctk.CTkFrame(f, fg_color="transparent")
-        row2.pack(fill="x", padx=14, pady=(5, 10))
+        # Fila Principal: Entrada de IP + Botón Conectar + Botón Auto-USB
+        row_main = ctk.CTkFrame(f, fg_color="transparent")
+        row_main.pack(fill="x", padx=14, pady=(0, 12))
         
-        ctk.CTkLabel(row2, text="Emparejar (Android 11+):", font=ctk.CTkFont(size=11), text_color=COLORS["text2"]).pack(side="left", padx=(0, 10))
-        self.e_wifi_code = ctk.CTkEntry(row2, placeholder_text="Código", textvariable=self.v_wifi_pair_code, width=100, height=28)
+        self.e_wifi_ip = ctk.CTkEntry(row_main, placeholder_text="Dirección IP:Puerto (ej: 192.168.1.10:5555)", textvariable=self.v_wifi_ip, height=36, font=ctk.CTkFont(size=12))
+        self.e_wifi_ip.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        
+        ctk.CTkButton(row_main, text="Conectar", width=110, height=36, fg_color=COLORS["accent"], text_color=COLORS["bg"], font=ctk.CTkFont(size=12, weight="bold"), command=self._wifi_connect).pack(side="left", padx=(0, 6))
+        ctk.CTkButton(row_main, text="⚡ Auto-USB", width=110, height=36, fg_color="transparent", border_width=1, border_color=COLORS["border"], font=ctk.CTkFont(size=11), command=self._wifi_enable_tcpip).pack(side="left")
+
+        # Separador visual
+        line = ctk.CTkFrame(f, height=1, fg_color=COLORS["border"])
+        line.pack(fill="x", padx=14, pady=0)
+
+        # Fila Secundaria: Emparejamiento (Android 11+)
+        row_pair = ctk.CTkFrame(f, fg_color="transparent")
+        row_pair.pack(fill="x", padx=14, pady=10)
+        
+        ctk.CTkLabel(row_pair, text="Emparejar (Android 11+):", font=ctk.CTkFont(size=11), text_color=COLORS["text2"]).pack(side="left", padx=(0, 12))
+        
+        self.e_wifi_code = ctk.CTkEntry(row_pair, placeholder_text="Código de 6 dígitos", textvariable=self.v_wifi_pair_code, width=150, height=30, font=ctk.CTkFont(size=11))
         self.e_wifi_code.pack(side="left", padx=(0, 10))
-        ctk.CTkButton(row2, text="Emparejar", width=100, height=28, fg_color=COLORS["purple"], font=ctk.CTkFont(size=11), command=self._wifi_pair).pack(side="left")
+        
+        ctk.CTkButton(row_pair, text="Validar Código", width=120, height=30, fg_color=COLORS["purple"], font=ctk.CTkFont(size=11, weight="bold"), command=self._wifi_pair).pack(side="left")
 
     def _wifi_connect(self):
         ip = self.v_wifi_ip.get().strip()
