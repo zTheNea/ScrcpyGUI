@@ -114,6 +114,7 @@ class ScrcpyGUI(ctk.CTk):
         self.v_camera_id = ctk.StringVar(value="0")
         self.v_camera_size = ctk.StringVar(value="")
         self.v_v4l2_device = ctk.StringVar(value="")
+        self.v_display_id = ctk.StringVar(value="0")
 
         self._build_ui()
         self._update_command()
@@ -300,8 +301,10 @@ class ScrcpyGUI(ctk.CTk):
         self._cfg_option_menu(c1, "Fuente Audio", self.v_audio_source, ["output", "mic"])
         self._cfg_option_menu(c1, "Codec Audio", self.v_audio_codec, ["opus", "aac", "raw"])
         self._cfg_slider(c1, "Buffer audio (ms)", self.v_audio_buf, 0, 500)
-        self._cfg_switch(c1, "🖥️ Pantalla Virtual", self.v_virtual_display)
-        self._cfg_entry(c1, "Res. Virtual (WxH)", self.v_virtual_display_res)
+        self._cfg_entry(c1, "Display ID (0=Principal)", self.v_display_id)
+        self._cfg_switch(c1, "🖥️ Nueva Pantalla Virtual", self.v_virtual_display)
+        self._cfg_entry(c1, "Res. Virtual (Sugerido 1280x720)", self.v_virtual_display_res)
+        self.v_virtual_display_res.set("1280x720")
         self._cfg_switch(c1, "Pantalla completa", self.v_fullscreen); self._cfg_switch(c1, "Siempre al frente", self.v_always_on_top); self._cfg_switch(c1, "Sin bordes", self.v_borderless)
         if not mgr.IS_WINDOWS:
             self._cfg_entry(c1, "V4L2 Sink (/dev/videoN)", self.v_v4l2_device)
@@ -387,6 +390,8 @@ class ScrcpyGUI(ctk.CTk):
         else:
             ms = self.v_max_size.get().strip()
             if ms and ms != "0": args.append(f"--max-size={ms}")
+            did = self.v_display_id.get().strip()
+            if did and did != "0": args.append(f"--display-id={did}")
 
         codec = self.v_codec.get(); 
         if codec and codec != "h264": args.append(f"--video-codec={codec}")
