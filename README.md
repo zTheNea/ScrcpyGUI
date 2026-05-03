@@ -49,4 +49,8 @@ Una interfaz gráfica profesional, ultra-rápida y optimizada para la gestión d
 - **Red**: Wi-Fi de 5GHz, 6E o 7 recomendado para modo inalámbrico.
 
 ---
+
+## 📜 Licencia
+Este proyecto está bajo la Licencia **MIT**. Consulta el archivo [LICENSE](LICENSE) para más detalles.
+
 *Desarrollado por [zTheNea](https://github.com/zTheNea) - Mayo 2026*
