@@ -139,44 +139,4 @@ def list_devices():
         return devices
     except Exception:
         return []
-def _get_adb_path():
-    p = get_scrcpy_path()
-    if not p: return shutil.which("adb")
-    adb = os.path.join(os.path.dirname(p), "adb.exe" if IS_WINDOWS else "adb")
-    if os.path.isfile(adb): return adb
-    return shutil.which("adb")
 
-def get_installed_apps(serial):
-    """Returns a list of (label, package) for user-installed apps."""
-    import subprocess
-    try:
-        adb = _get_adb_path()
-        if not adb: return []
-        # Complex shell script to get labels and packages in one go
-        cmd_script = 'for p in $(pm list packages -3 | cut -f 2 -d ":"); do label=$(dumpsys package $p | grep -m 1 "label=" | cut -f 2 -d "="); if [ -z "$label" ]; then label=$p; fi; echo "$label|$p"; done'
-        r = subprocess.run([adb, "-s", serial, "shell", cmd_script], capture_output=True, text=True, timeout=20)
-        
-        apps = []
-        for line in r.stdout.splitlines():
-            if "|" in line:
-                label, pkg = line.split("|", 1)
-                apps.append((label.strip(), pkg.strip()))
-            elif line.strip():
-                apps.append((line.strip(), line.strip()))
-        
-        return sorted(apps, key=lambda x: x[0].lower())
-    except Exception:
-        return []
-
-def launch_app_on_display(serial, package, display_id):
-    """Launches an app on a specific display ID."""
-    import subprocess
-    try:
-        adb = _get_adb_path()
-        if not adb: return False
-        cmd = [adb, "-s", serial, "shell", "am", "start", "--display", str(display_id), package]
-        # Fallback for older Androids or specific activities
-        subprocess.run(cmd, capture_output=True)
-        return True
-    except Exception:
-        return False
