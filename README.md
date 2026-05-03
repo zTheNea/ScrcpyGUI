@@ -1,54 +1,52 @@
-# ScrcpyGUI 🚀
+# 📱 ScrcpyGUI v1.2.0 - Edición Vanguardia 2026
 
-**ScrcpyGUI** es una interfaz gráfica nativa para Windows diseñada para potenciar el uso de [scrcpy](https://github.com/Genymobile/scrcpy). Permite controlar dispositivos Android con configuraciones optimizadas, gestión de latencia ultra baja y actualización automática del motor.
-
-![ScrcpyGUI Badge](https://img.shields.io/badge/Version-v1.0.0-blue?style=for-the-badge)
-![Python](https://img.shields.io/badge/Python-3.14+-yellow?style=for-the-badge&logo=python)
-![CustomTkinter](https://img.shields.io/badge/UI-CustomTkinter-orange?style=for-the-badge)
-
-## ✨ Características Principales
-
-- **📦 Auto-Updater**: Descarga y actualiza automáticamente la última versión de `scrcpy` directamente desde GitHub.
-- **🎨 Presets Optimizados**:
-  - **🎬 Cinema**: Máxima fidelidad visual (4K/HEVC) para consumo de contenido.
-  - **🎮 Pro Gaming**: Latencia mínima con soporte para entrada HID física (Teclado/Ratón/Gamepad).
-  - **⚖️ Balanced**: Perfil estándar para uso diario y aplicaciones.
-  - **🚀 Ultra (AV1)**: Preparado para el futuro con soporte de códec AV1 y altas tasas de refresco (144Hz+).
-- **🎛️ Panel Personalizado**: Control total sobre códecs (H264, H265, AV1), bitrates, FPS, buffers y más.
-- **📱 Quick Settings**: Toggles rápidos para apagar la pantalla del dispositivo o mantenerlo despierto sin cambiar de perfil.
-- **💻 Terminal Integrada**: Visualización en tiempo real de los logs de `scrcpy` para depuración.
-
-## 🛠️ Herramientas y Tecnologías
-
-- **Lenguaje**: Python 3.14+
-- **GUI**: CustomTkinter (Modern Dark Theme)
-- **Motor**: scrcpy (Genymobile)
-- **Compilación**: PyInstaller
-- **Detección de Hardware**: ADB (Android Debug Bridge)
-
-## 🚀 Instalación y Uso
-
-1. Descarga el ejecutable desde la carpeta `dist/` o los Releases de GitHub.
-2. Asegúrate de tener **Depuración USB** activada en tu dispositivo Android.
-3. Conecta el móvil por USB o Wi-Fi.
-4. Selecciona un modo y pulsa **Iniciar Scrcpy**.
-
-## 🏗️ Estructura del Proyecto
-
-- `scrcpy_gui.py`: Lógica principal de la interfaz y gestión de procesos.
-- `scrcpy_manager.py`: Módulo de descarga, verificación de versiones y gestión de archivos.
-- `ScrcpyGUI.spec`: Configuración para empaquetado del ejecutable.
-- `.gitignore`: Configuración de exclusión para Git.
-
-## 📝 Especificaciones Técnicas
-
-| Característica | Detalle |
-| :--- | :--- |
-| **Códecs Soportados** | H.264, H.265 (HEVC), AV1 |
-| **Input** | HID (Teclado, Ratón, Gamepad), AOA, UHID |
-| **Audio** | Forwarding nativo de scrcpy |
-| **Resolución** | Hasta 4K / Nativa |
-| **Tasa de Refresco** | Hasta 144Hz |
+Una interfaz gráfica profesional, ultra-rápida y optimizada para la gestión de dispositivos Android mediante `scrcpy`. Diseñada para ofrecer la máxima fidelidad visual y latencia cero.
 
 ---
-Desarrollado para mejorar la experiencia de productividad y gaming entre Android y PC.
+
+## 🚀 Novedades de la Versión (Mayo 2026)
+
+### 🔗 Suite de Conexión Inalámbrica (ADB Wi-Fi)
+- **Auto-USB a Wi-Fi**: Convierte una conexión USB a inalámbrica con un solo clic. La app detecta la IP y conecta automáticamente.
+- **Wireless Pairing**: Soporte nativo para Android 11+ mediante código de emparejamiento.
+- **Gestión de IP**: Conexión manual a dispositivos en red local.
+
+### ⚡ Presets de Alto Rendimiento 2026
+- **Cinema 4K (AV1)**: El nuevo estándar de fidelidad usando el códec AV1.
+- **Gaming Pro (144Hz)**: Optimizado para monitores de alta frecuencia, con latencia de búfer cero y soporte **HID v2**.
+- **Wi-Fi 7 / 6E**: Configuraciones ajustadas para exprimir el ancho de banda de los routers de última generación.
+- **Studio Creator**: Grabación en alta tasa de bits (48M) para creadores de contenido.
+
+### 🧠 Inteligencia Adaptativa
+- **OS-Aware**: La interfaz detecta si estás en Windows o Linux y oculta funciones incompatibles (como V4L2).
+- **Auto-Limpieza**: Gestión de procesos mejorada para evitar que el motor de scrcpy quede colgado en segundo plano.
+
+---
+
+## 📖 Guía de Uso Rápido
+
+### 1. Conexión por Wi-Fi (Sin cables)
+*   **Si ya tienes cable**: Conecta el móvil por USB, pulsa el botón **⚡ Auto-USB** y espera al mensaje de confirmación. Desconecta el cable y ¡listo!
+*   **Si NO tienes cable (Android 11+)**: 
+    1. Ve a tu móvil > Ajustes > Depuración Inalámbrica > Emparejar con código.
+    2. En ScrcpyGUI, ingresa la IP y el Código de 6 dígitos. 
+    3. Pulsa **Validar Código**.
+    4. Luego ingresa la IP final de conexión y pulsa **Conectar**.
+
+### 2. Selección de Perfiles
+*   **¿Vas a jugar?**: Usa **Gaming Pro**. Desactivará la pantalla del móvil para ahorrar batería y calor, y te dará la mínima latencia posible.
+*   **¿Quieres ver pelis o fotos?**: Usa **Cinema 4K**. El códec AV1 te dará una calidad de imagen asombrosa.
+*   **¿Eres Streamer?**: Usa **Studio Creator**. El programa grabará automáticamente tu sesión en la máxima calidad para que la subas a tus redes.
+
+### 3. Personalización
+*   En el modo **⚙️ Personalizado**, puedes ajustar manualmente el Bitrate, la resolución y el códec si tienes un hardware muy específico.
+
+---
+
+## 🛠️ Requisitos
+- **Android**: 5.0 o superior (Android 11+ recomendado para Wi-Fi).
+- **Hardware**: Compatible con decodificación de video H.264, H.265 o AV1 (recomendado).
+- **Red**: Wi-Fi de 5GHz, 6E o 7 recomendado para modo inalámbrico.
+
+---
+*Desarrollado por [zTheNea](https://github.com/zTheNea) - Mayo 2026*
