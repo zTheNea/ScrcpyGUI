@@ -110,6 +110,10 @@ class ScrcpyGUI(ctk.CTk):
         self.v_window_title = ctk.StringVar(value="Scrcpy Mirror")
         self.v_virtual_display = ctk.BooleanVar(value=False)
         self.v_virtual_display_res = ctk.StringVar(value="1920x1080")
+        self.v_video_source = ctk.StringVar(value="display")
+        self.v_camera_id = ctk.StringVar(value="0")
+        self.v_camera_size = ctk.StringVar(value="")
+        self.v_v4l2_device = ctk.StringVar(value="")
 
         self._build_ui()
         self._update_command()
@@ -285,9 +289,10 @@ class ScrcpyGUI(ctk.CTk):
         ctk.CTkLabel(self.custom_frame, text="🔧 Configuración Personalizada", font=ctk.CTkFont(size=16, weight="bold"), text_color=COLORS["orange"]).pack(fill="x", padx=16, pady=(14, 10))
         cols = ctk.CTkFrame(self.custom_frame, fg_color="transparent"); cols.pack(fill="x", padx=12, pady=(0, 14))
         cols.columnconfigure((0, 1, 2), weight=1, uniform="cfg")
-        c0 = self._cfg_group(cols, "🎥 Video", 0)
+        c0 = self._cfg_group(cols, "🎥 Video y Cámara", 0)
+        self._cfg_option_menu(c0, "Fuente Video", self.v_video_source, ["display", "camera"])
         self._cfg_option_menu(c0, "Códec", self.v_codec, ["h264", "h265", "av1"])
-        self._cfg_entry(c0, "Resolución máx (px)", self.v_max_size)
+        self._cfg_entry(c0, "Cámara ID / Res", self.v_camera_id) # Dual use for simple UI
         self._cfg_slider(c0, "FPS", self.v_fps, 15, 120)
         self._cfg_slider(c0, "Bitrate (Mbps)", self.v_bitrate, 1, 32)
         c1 = self._cfg_group(cols, "🔊 Audio y Pantalla", 1)
@@ -298,6 +303,8 @@ class ScrcpyGUI(ctk.CTk):
         self._cfg_switch(c1, "🖥️ Pantalla Virtual", self.v_virtual_display)
         self._cfg_entry(c1, "Res. Virtual (WxH)", self.v_virtual_display_res)
         self._cfg_switch(c1, "Pantalla completa", self.v_fullscreen); self._cfg_switch(c1, "Siempre al frente", self.v_always_on_top); self._cfg_switch(c1, "Sin bordes", self.v_borderless)
+        if not mgr.IS_WINDOWS:
+            self._cfg_entry(c1, "V4L2 Sink (/dev/videoN)", self.v_v4l2_device)
         c2 = self._cfg_group(cols, "🎛️ Controles y Graba", 2)
         self._cfg_option_menu(c2, "Teclado", self.v_keyboard, ["", "uhid", "aoa", "disabled"])
         self._cfg_option_menu(c2, "Ratón", self.v_mouse, ["", "uhid", "aoa", "disabled"])
@@ -371,10 +378,18 @@ class ScrcpyGUI(ctk.CTk):
         if dev and "Buscando" not in dev and "Sin dispositivos" not in dev:
             args.extend(["-s", dev])
 
+        # Video Source
+        src = self.v_video_source.get()
+        if src == "camera":
+            args.append("--video-source=camera")
+            cid = self.v_camera_id.get().strip()
+            if cid: args.append(f"--camera-id={cid}")
+        else:
+            ms = self.v_max_size.get().strip()
+            if ms and ms != "0": args.append(f"--max-size={ms}")
+
         codec = self.v_codec.get(); 
         if codec and codec != "h264": args.append(f"--video-codec={codec}")
-        ms = self.v_max_size.get().strip()
-        if ms and ms != "0": args.append(f"--max-size={ms}")
         fps = self.v_fps.get()
         if fps: args.append(f"--max-fps={fps}")
         br = self.v_bitrate.get()
@@ -400,6 +415,9 @@ class ScrcpyGUI(ctk.CTk):
         if self.v_virtual_display.get():
             res = self.v_virtual_display_res.get().strip() or "1920x1080"
             args.append(f"--new-display={res}")
+        
+        if not mgr.IS_WINDOWS and self.v_v4l2_device.get().strip():
+            args.append(f"--v4l2-sink={self.v_v4l2_device.get().strip()}")
         
         kb = self.v_keyboard.get()
         if kb: args.append(f"--keyboard={kb}")
