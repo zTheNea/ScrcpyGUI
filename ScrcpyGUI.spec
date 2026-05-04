@@ -1,12 +1,17 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 
+import os
+import customtkinter
+
+ctk_path = os.path.dirname(customtkinter.__file__)
+
 a = Analysis(
     ['scrcpy_gui.py'],
     pathex=[],
     binaries=[],
-    datas=[],
-    hiddenimports=['PIL._tkinter_finder'],
+    datas=[(ctk_path, 'customtkinter')],
+    hiddenimports=[],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

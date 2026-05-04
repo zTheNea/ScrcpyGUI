@@ -1,5 +1,5 @@
 """Manages scrcpy download, detection and updates from GitHub."""
-import os, json, shutil, zipfile, urllib.request, threading, platform, ssl
+import os, json, shutil, zipfile, urllib.request, threading, platform, ssl, subprocess, re
 
 GITHUB_API = "https://api.github.com/repos/Genymobile/scrcpy/releases/latest"
 
@@ -13,6 +13,13 @@ else:
 
 SCRCPY_DIR = os.path.join(APP_DIR, "scrcpy")
 VERSION_FILE = os.path.join(APP_DIR, "version.json")
+
+def _subprocess_kwargs():
+    """Return common subprocess kwargs (hides console window on Windows)."""
+    kw = {}
+    if IS_WINDOWS:
+        kw["creationflags"] = subprocess.CREATE_NO_WINDOW
+    return kw
 
 def get_scrcpy_path():
     """Find scrcpy: app dir > PATH > None."""
@@ -43,11 +50,15 @@ def _save_version(ver, url):
         json.dump({"version": ver, "url": url}, f)
 
 def get_ssl_context():
-    """Create a context that ignores certificate verification errors if needed."""
+    """Create an SSL context. Uses verified certificates by default, with unverified fallback."""
     try:
-        return ssl._create_unverified_context()
-    except AttributeError:
-        return None
+        ctx = ssl.create_default_context()
+        return ctx
+    except Exception:
+        try:
+            return ssl._create_unverified_context()
+        except AttributeError:
+            return None
 
 def check_latest(callback):
     """Check GitHub for latest release. Calls callback(tag, download_url, error)."""
@@ -117,12 +128,21 @@ def download_and_install(url, progress_cb=None, done_cb=None):
                 done_cb(str(e))
     threading.Thread(target=run, daemon=True).start()
 
+def _get_adb_path():
+    p = get_scrcpy_path()
+    if not p: return shutil.which("adb")
+    adb = os.path.join(os.path.dirname(p), "adb.exe" if IS_WINDOWS else "adb")
+    if os.path.isfile(adb): return adb
+    return shutil.which("adb")
+
 def list_devices():
     """Returns a list of (serial, model) for connected devices."""
-    import subprocess
     try:
-        # Run adb devices -l to get model names
-        output = subprocess.check_output(["adb", "devices", "-l"], text=True, stderr=subprocess.STDOUT)
+        adb = _get_adb_path() or "adb"
+        output = subprocess.check_output(
+            [adb, "devices", "-l"], text=True, stderr=subprocess.STDOUT,
+            **_subprocess_kwargs()
+        )
         lines = output.strip().split("\n")[1:]
         devices = []
         for line in lines:
@@ -140,59 +160,115 @@ def list_devices():
     except Exception:
         return []
 
-def _get_adb_path():
-    p = get_scrcpy_path()
-    if not p: return shutil.which("adb")
-    adb = os.path.join(os.path.dirname(p), "adb.exe" if IS_WINDOWS else "adb")
-    if os.path.isfile(adb): return adb
-    return shutil.which("adb")
-
 def connect_wifi(ip):
     """Runs adb connect ip."""
-    import subprocess
     try:
         adb = _get_adb_path()
         if not adb: return "ADB no encontrado"
-        r = subprocess.run([adb, "connect", ip], capture_output=True, text=True, timeout=10)
-        return r.stdout.strip()
+        r = subprocess.run(
+            [adb, "connect", ip], capture_output=True, text=True, timeout=10,
+            **_subprocess_kwargs()
+        )
+        return r.stdout.strip() or r.stderr.strip()
     except Exception as e:
         return str(e)
 
 def pair_wifi(ip_port, code):
     """Runs adb pair ip:port code."""
-    import subprocess
     try:
         adb = _get_adb_path()
         if not adb: return "ADB no encontrado"
-        r = subprocess.run([adb, "pair", ip_port, code], capture_output=True, text=True, timeout=15)
-        return r.stdout.strip()
+        r = subprocess.run(
+            [adb, "pair", ip_port, code], capture_output=True, text=True, timeout=15,
+            **_subprocess_kwargs()
+        )
+        return r.stdout.strip() or r.stderr.strip()
     except Exception as e:
         return str(e)
 
 def enable_tcpip(serial):
     """Runs adb tcpip 5555, gets IP, and connects."""
-    import subprocess
-    import re
     try:
         adb = _get_adb_path()
         if not adb: return "ADB no encontrado"
+        kw = _subprocess_kwargs()
         
         # 1. Enable TCP/IP
-        subprocess.run([adb, "-s", serial, "tcpip", "5555"], capture_output=True, text=True, timeout=10)
+        subprocess.run([adb, "-s", serial, "tcpip", "5555"], capture_output=True, text=True, timeout=10, **kw)
         
         # 2. Get IP address
-        r_ip = subprocess.run([adb, "-s", serial, "shell", "ip", "addr", "show", "wlan0"], capture_output=True, text=True, timeout=5)
+        r_ip = subprocess.run([adb, "-s", serial, "shell", "ip", "addr", "show", "wlan0"], capture_output=True, text=True, timeout=5, **kw)
         ip_match = re.search(r'inet\s+(\d+\.\d+\.\d+\.\d+)', r_ip.stdout)
         if not ip_match:
             # Try alternative command for some devices
-            r_ip = subprocess.run([adb, "-s", serial, "shell", "ifconfig", "wlan0"], capture_output=True, text=True, timeout=5)
+            r_ip = subprocess.run([adb, "-s", serial, "shell", "ifconfig", "wlan0"], capture_output=True, text=True, timeout=5, **kw)
             ip_match = re.search(r'inet addr:(\d+\.\d+\.\d+\.\d+)', r_ip.stdout)
             
         if ip_match:
             ip = ip_match.group(1)
             # 3. Connect
-            subprocess.run([adb, "connect", f"{ip}:5555"], capture_output=True, text=True, timeout=10)
+            subprocess.run([adb, "connect", f"{ip}:5555"], capture_output=True, text=True, timeout=10, **kw)
             return f"Conectado a {ip} vía Wi-Fi"
         return "Modo TCP/IP activo, pero no pude obtener la IP automáticamente. Conéctate manualmente."
     except Exception as e:
         return str(e)
+
+def get_installed_apps(device_id):
+    """Escáner Universal Triple: Máxima compatibilidad Android."""
+    try:
+        adb = _get_adb_path() or "adb"
+        raw_output = ""
+        kw = _subprocess_kwargs()
+        
+        # Intentar 3 métodos diferentes por orden de modernidad
+        cmds = [
+            [adb, "-s", device_id, "shell", "cmd", "package", "list", "packages", "-3"],
+            [adb, "-s", device_id, "shell", "pm", "list", "packages"],
+            [adb, "-s", device_id, "shell", "pm", "list", "packages", "-f"]
+        ]
+        
+        for c in cmds:
+            res = subprocess.run(c, capture_output=True, text=True, timeout=5, **kw)
+            if res.stdout and len(res.stdout.strip()) > 10:
+                raw_output = res.stdout
+                break
+        
+        if not raw_output:
+            # Último recurso: Dumpsys filtrado en Python (pipes no funcionan sin shell)
+            res = subprocess.run(
+                [adb, "-s", device_id, "shell", "dumpsys", "package"],
+                capture_output=True, text=True, timeout=10, **kw
+            )
+            # Filtrar líneas que contengan "Package [" y extraer el nombre del paquete
+            for line in res.stdout.splitlines():
+                if "Package [" in line:
+                    try:
+                        pkg = line.split("[")[1].split("]")[0].strip()
+                        if pkg and "." in pkg:
+                            raw_output += f"package:{pkg}\n"
+                    except (IndexError, ValueError):
+                        pass
+
+        packages = []
+        for line in raw_output.splitlines():
+            line = line.strip()
+            if not line: continue
+            
+            # Limpiar prefijos comunes de ADB
+            pkg = line.replace("package:", "")
+            if "=" in pkg: pkg = pkg.split("=")[-1] # Caso con ruta de archivo
+            pkg = pkg.strip()
+            
+            if pkg and "." in pkg:
+                # Nombre amigable simple
+                name = pkg.split(".")[-1].capitalize()
+                if name.lower() in ["android", "app", "google"] and len(pkg.split(".")) > 1:
+                    name = pkg.split(".")[-2].capitalize()
+                packages.append((name, pkg))
+        
+        # Eliminar duplicados y ordenar
+        unique_apps = list(set(packages))
+        return sorted(unique_apps, key=lambda x: x[0])
+    except Exception as e:
+        print(f"Error en escaneo universal: {e}")
+        return []

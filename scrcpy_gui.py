@@ -8,17 +8,21 @@ import customtkinter as ctk
 from customtkinter import filedialog
 import subprocess
 import threading
+import queue
+import time
 import os
 import shutil
 import json
+import re
+from datetime import datetime
 import scrcpy_manager as mgr
 
 # ── Presets ──
 PRESETS = {
     "video": {
-        "label": "💎 Cinema 4K (2026 AV1)", "desc": "Máxima fidelidad Next-Gen (AV1)",
-        "badge": "Ultra/AV1",
-        "codec": "av1", "max_size": 3840, "fps": 60, "bitrate": 32,
+        "label": "💎 Cine 2K (H.265 Pro)", "desc": "Máxima fidelidad sin lag. Ideal para ver contenido.",
+        "badge": "High Quality",
+        "codec": "h265", "max_size": 2560, "fps": 60, "bitrate": 24,
         "audio": True, "audio_buffer": 60, "video_buffer": 10,
         "fullscreen": False, "stay_awake": True, "screen_off": False,
         "keyboard": "", "mouse": "", "gamepad": False,
@@ -26,9 +30,9 @@ PRESETS = {
         "show_touches": False, "crop": "",
     },
     "gaming": {
-        "label": "🎮 Gaming Pro (144Hz/HID)", "desc": "Latencia cero para eSports",
-        "badge": "Low Latency",
-        "codec": "h265", "max_size": 1920, "fps": 144, "bitrate": 16,
+        "label": "🎮 Gaming Pro (1080p/HID)", "desc": "Latencia cero. Optimizado para eSports.",
+        "badge": "eSports Ready",
+        "codec": "h265", "max_size": 1920, "fps": 60, "bitrate": 8,
         "audio": True, "audio_buffer": 20, "video_buffer": 0,
         "fullscreen": True, "stay_awake": True, "screen_off": True,
         "keyboard": "uhid", "mouse": "uhid", "gamepad": True,
@@ -36,9 +40,9 @@ PRESETS = {
         "show_touches": False, "crop": "",
     },
     "balanced": {
-        "label": "⚖️ Inalámbrico (Wi-Fi 7/6E)", "desc": "Optimizado para redes modernas",
-        "badge": "Wi-Fi 2K",
-        "codec": "h265", "max_size": 2560, "fps": 60, "bitrate": 14,
+        "label": "⚖️ Inalámbrico (Wi-Fi 6/7)", "desc": "Estable y fluido para uso diario.",
+        "badge": "Balanced",
+        "codec": "h265", "max_size": 1920, "fps": 60, "bitrate": 12,
         "audio": True, "audio_buffer": 80, "video_buffer": 15,
         "fullscreen": False, "stay_awake": True, "screen_off": False,
         "keyboard": "", "mouse": "", "gamepad": False,
@@ -46,16 +50,29 @@ PRESETS = {
         "show_touches": False, "crop": "",
     },
     "ultra": {
-        "label": "🚀 Studio Creator", "desc": "Grabación RAW y edición",
-        "badge": "Master",
-        "codec": "h264", "max_size": 0, "fps": 60, "bitrate": 48,
-        "audio": True, "audio_buffer": 40, "video_buffer": 5,
+        "label": "🔋 Modo Compatible", "desc": "Funciona en cualquier dispositivo (Legacy).",
+        "badge": "Max Compatibility",
+        "codec": "h264", "max_size": 1280, "fps": 30, "bitrate": 4,
+        "audio": True, "audio_buffer": 100, "video_buffer": 20,
         "fullscreen": False, "stay_awake": True, "screen_off": False,
-        "keyboard": "uhid", "mouse": "uhid", "gamepad": False,
-        "record": True, "record_file": "studio_rec_%Y%m%d_%H%M%S.mp4", "print_fps": True,
-        "show_touches": True, "crop": "",
+        "keyboard": "sdk", "mouse": "sdk", "gamepad": False,
+        "record": False, "record_file": "", "print_fps": False,
+        "show_touches": False, "crop": "",
     },
 }
+
+VIRTUAL_RES_PRESETS = ["1920x1080", "1280x720", "2560x1440", "3840x2160", "720x1280 (Portrait)", "1080x1920 (Portrait)", "Personalizada"]
+
+AUDIO_SOURCES = ["output", "playback", "mic", "mic-unprocessed", "mic-camcorder",
+                 "mic-voice-recognition", "mic-voice-communication",
+                 "voice-call", "voice-call-uplink", "voice-call-downlink", "voice-performance"]
+AUDIO_CODECS = ["opus", "aac", "flac", "raw"]
+KEYBOARD_MODES = ["", "sdk", "uhid", "aoa", "disabled"]
+MOUSE_MODES = ["", "sdk", "uhid", "aoa", "disabled"]
+GAMEPAD_MODES = ["", "uhid", "aoa", "disabled"]
+ORIENTATION_VALUES = ["0", "90", "180", "270", "flip0", "flip90", "flip180", "flip270"]
+CAMERA_FACING = ["", "front", "back", "external"]
+
 
 # ── Theme ──
 ctk.set_appearance_mode("dark")
@@ -83,20 +100,26 @@ class ScrcpyGUI(ctk.CTk):
         self.process = None
         self.mode_buttons = {}
 
+        # Performance optimizations
+        self._after_update_id = None
+        self.log_queue = queue.Queue()
+        self._log_updater_running = False
+        self._scrcpy_path_cache = mgr.get_scrcpy_path()
+
         # ── Config variables ──
         self.v_codec = ctk.StringVar(value="h264")
-        self.v_max_size = ctk.StringVar(value="1920")
+        self.v_res_preset = ctk.StringVar(value="1080p")
+        self.v_max_size = ctk.StringVar(value="1920") # This will store the actual value used in cmd
         self.v_fps = ctk.IntVar(value=60)
         self.v_bitrate = ctk.IntVar(value=8)
         self.v_audio = ctk.BooleanVar(value=True)
         self.v_audio_buf = ctk.IntVar(value=50)
-        self.v_video_buf = ctk.IntVar(value=0)
         self.v_fullscreen = ctk.BooleanVar(value=False)
         self.v_stay_awake = ctk.BooleanVar(value=True)
         self.v_screen_off = ctk.BooleanVar(value=False)
         self.v_keyboard = ctk.StringVar(value="")
         self.v_mouse = ctk.StringVar(value="")
-        self.v_gamepad = ctk.BooleanVar(value=False)
+        self.v_gamepad = ctk.StringVar(value="")
         self.v_record = ctk.BooleanVar(value=False)
         self.v_record_file = ctk.StringVar(value="recording.mp4")
         self.v_print_fps = ctk.BooleanVar(value=False)
@@ -109,16 +132,73 @@ class ScrcpyGUI(ctk.CTk):
         self.v_borderless = ctk.BooleanVar(value=False)
         self.v_window_title = ctk.StringVar(value="Scrcpy Mirror")
         self.v_virtual_display = ctk.BooleanVar(value=False)
-        self.v_virtual_display_res = ctk.StringVar(value="1920x1080")
+        self.v_virtual_display_res = ctk.StringVar(value="1280x720")
+        self.v_virtual_res_preset = ctk.StringVar(value="1280x720")
+        self.v_virtual_display_app = ctk.StringVar(value="")
+        self.app_list_data = {} # Para mapear nombre -> paquete
         self.v_video_source = ctk.StringVar(value="display")
         self.v_camera_id = ctk.StringVar(value="0")
         self.v_camera_size = ctk.StringVar(value="")
+        self.v_camera_facing = ctk.StringVar(value="")
+        self.v_camera_fps = ctk.IntVar(value=30)
+        self.v_camera_ar = ctk.StringVar(value="")
+        self.v_camera_high_speed = ctk.BooleanVar(value=False)
         self.v_v4l2_device = ctk.StringVar(value="")
         self.v_wifi_ip = ctk.StringVar(value="")
         self.v_wifi_pair_code = ctk.StringVar(value="")
         self.v_display_id = ctk.StringVar(value="0")
+        self.v_orientation = ctk.StringVar(value="0")
+        self.v_capture_orientation = ctk.StringVar(value="0")
+        self.v_no_video = ctk.BooleanVar(value=False)
+        self.v_no_control = ctk.BooleanVar(value=False)
+        self.v_audio_dup = ctk.BooleanVar(value=False)
+        self.v_audio_bitrate = ctk.IntVar(value=128)
+        self.v_disable_screensaver = ctk.BooleanVar(value=False)
+        self.v_time_limit = ctk.IntVar(value=0)
+        self.v_no_vd_decorations = ctk.BooleanVar(value=False)
+        self.v_no_vd_destroy = ctk.BooleanVar(value=False)
+        self.v_virtual_dpi = ctk.StringVar(value="")
+        self.v_no_clipboard_sync = ctk.BooleanVar(value=False)
+        self.v_video_buffer = ctk.IntVar(value=0)
+
+        # Widget references for enabling/disabling
+        self.widgets = {}
 
         self._build_ui()
+        self._add_traces()
+        self._schedule_log_updater()
+        self._debounced_update()
+
+    def _add_traces(self):
+        """Add traces to variables to update UI state and command preview."""
+        vars_to_trace = [
+            self.v_video_source, self.v_audio, self.v_virtual_display,
+            self.v_keyboard, self.v_mouse, self.v_gamepad, self.v_record,
+            self.v_no_control, self.v_no_video, self.v_camera_id
+        ]
+        for v in vars_to_trace:
+            v.trace_add("write", lambda *_: self._debounced_update())
+        
+        # Others that only update command
+        other_vars = [self.v_codec, self.v_fps, self.v_bitrate, self.v_audio_source, self.v_audio_codec, 
+                      self.v_audio_buf, self.v_display_id, self.v_virtual_display_res, self.v_virtual_display_app,
+                      self.v_orientation, self.v_audio_bitrate, self.v_audio_dup, self.v_video_buffer,
+                      self.v_time_limit, self.v_camera_facing, self.v_camera_fps, self.v_virtual_dpi,
+                      self.v_no_vd_decorations, self.v_no_vd_destroy, self.v_no_clipboard_sync,
+                      self.v_disable_screensaver]
+        for v in other_vars:
+            v.trace_add("write", lambda *_: self._debounced_update())
+
+    def _debounced_update(self):
+        """Schedule UI updates with a small delay to prevent lag."""
+        if self._after_update_id:
+            self.after_cancel(self._after_update_id)
+        self._after_update_id = self.after(100, self._perform_update)
+
+    def _perform_update(self):
+        """Execute the actual UI updates."""
+        self._after_update_id = None
+        self._update_ui_states()
         self._update_command()
 
     def _build_ui(self):
@@ -203,7 +283,7 @@ class ScrcpyGUI(ctk.CTk):
                 self.scrcpy_status.configure(text=f"🆕 Nueva versión disponible: {tag}" + (f" (actual: {installed})" if installed else ""), text_color=COLORS["accent"])
                 self.btn_download.configure(text=f"⬇️ Descargar {tag}")
                 try: self.btn_download.pack(side="right", padx=(8, 0))
-                except: pass
+                except Exception: pass
         self.after(0, update)
 
     def _start_download(self):
@@ -291,15 +371,69 @@ class ScrcpyGUI(ctk.CTk):
         if key == "custom": self.custom_frame.pack(fill="x", pady=(8, 12), after=self._modes_anchor)
         else:
             self.custom_frame.pack_forget()
+            self._reset_to_defaults()
             self._apply_preset(PRESETS[key])
+        self._debounced_update()
+
+    def _reset_to_defaults(self):
+        """Reset all configuration variables to their default values."""
+        self.v_video_source.set("display")
+        self.v_codec.set("h264")
+        self.v_res_preset.set("1080p")
+        self.v_max_size.set("1920")
+        self.v_fps.set(60)
+        self.v_bitrate.set(8)
+        self.v_audio.set(True)
+        self.v_audio_buf.set(50)
+        self.v_video_buffer.set(0)
+        self.v_fullscreen.set(False)
+        self.v_stay_awake.set(True)
+        self.v_screen_off.set(False)
+        self.v_keyboard.set("")
+        self.v_mouse.set("")
+        self.v_gamepad.set("")
+        self.v_record.set(False)
+        self.v_record_file.set("recording.mp4")
+        self.v_print_fps.set(False)
+        self.v_show_touches.set(False)
+        self.v_crop.set("")
+        self.v_audio_source.set("output")
+        self.v_audio_codec.set("opus")
+        self.v_always_on_top.set(False)
+        self.v_borderless.set(False)
+        self.v_virtual_display.set(False)
+        self.v_virtual_display_res.set("1280x720")
+        self.v_virtual_res_preset.set("1280x720")
+        self.v_virtual_display_app.set("")
+        self.v_camera_id.set("0")
+        self.v_camera_facing.set("")
+        self.v_camera_fps.set(30)
+        self.v_display_id.set("0")
+        self.v_orientation.set("0")
+        self.v_no_video.set(False)
+        self.v_no_control.set(False)
+        self.v_audio_dup.set(False)
+        self.v_audio_bitrate.set(128)
+        self.v_disable_screensaver.set(False)
+        self.v_time_limit.set(0)
+        self.v_no_vd_decorations.set(False)
+        self.v_no_vd_destroy.set(False)
+        self.v_virtual_dpi.set("")
+        self.v_no_clipboard_sync.set(False)
+        
+        # Sync UI components that don't auto-update from trace
+        self.res_menu.set("1080p")
+        self.v_res_menu.set("1280x720")
+        self.app_menu.set("Ninguna")
         self._update_command()
 
     def _apply_preset(self, p):
         self.v_codec.set(p["codec"]); self.v_max_size.set(str(p["max_size"])); self.v_fps.set(p["fps"])
         self.v_bitrate.set(p["bitrate"]); self.v_audio.set(p["audio"]); self.v_audio_buf.set(p["audio_buffer"])
-        self.v_video_buf.set(p["video_buffer"]); self.v_fullscreen.set(p["fullscreen"])
+        self.v_video_buffer.set(p["video_buffer"]); self.v_fullscreen.set(p["fullscreen"])
         self.v_stay_awake.set(p["stay_awake"]); self.v_screen_off.set(p["screen_off"])
-        self.v_keyboard.set(p["keyboard"]); self.v_mouse.set(p["mouse"]); self.v_gamepad.set(p["gamepad"])
+        self.v_keyboard.set(p["keyboard"]); self.v_mouse.set(p["mouse"])
+        self.v_gamepad.set("uhid" if p["gamepad"] else "")
         self.v_record.set(p["record"]); self.v_print_fps.set(p["print_fps"]); self.v_show_touches.set(p["show_touches"])
         self.v_crop.set(p["crop"])
 
@@ -312,19 +446,71 @@ class ScrcpyGUI(ctk.CTk):
         c0 = self._cfg_group(cols, "🎥 Video y Cámara", 0)
         self._cfg_option_menu(c0, "Fuente Video", self.v_video_source, ["display", "camera"])
         self._cfg_option_menu(c0, "Códec", self.v_codec, ["h264", "h265", "av1"])
-        self._cfg_entry(c0, "Cámara ID / Res", self.v_camera_id) # Dual use for simple UI
-        self._cfg_slider(c0, "FPS", self.v_fps, 15, 120)
-        self._cfg_slider(c0, "Bitrate (Mbps)", self.v_bitrate, 1, 32)
+        self.widgets["camera_id"] = self._cfg_entry(c0, "Cámara ID", self.v_camera_id)
+        self.widgets["camera_facing"] = self._cfg_option_menu(c0, "Cámara Cara", self.v_camera_facing, CAMERA_FACING)
+        self.widgets["camera_fps"] = self._cfg_slider(c0, "Cámara FPS", self.v_camera_fps, 15, 240)
+        self.widgets["orientation"] = self._cfg_option_menu(c0, "Orientación", self.v_orientation, ORIENTATION_VALUES)
+        
+        # Resolución Inteligente
+        ctk.CTkLabel(c0, text="Resolución Máxima", font=ctk.CTkFont(size=11), text_color=COLORS["text2"]).pack(anchor="w", padx=12, pady=(6, 0))
+        res_row = ctk.CTkFrame(c0, fg_color="transparent")
+        res_row.pack(fill="x", padx=12, pady=(2, 4))
+        self.res_menu = ctk.CTkOptionMenu(res_row, variable=self.v_res_preset, values=["Original", "2160p (4K)", "1440p (2K)", "1080p", "720p", "480p", "Personalizada"], width=100, fg_color=COLORS["card"], button_color=COLORS["border"], command=self._on_res_change)
+        self.res_menu.pack(side="left", padx=(12, 5))
+        self.widgets["display_res_menu"] = self.res_menu
+        
+        self.e_res_custom = ctk.CTkEntry(res_row, textvariable=self.v_max_size, width=70, fg_color=COLORS["card"], border_color=COLORS["border"], state="disabled")
+        self.e_res_custom.pack(side="left", padx=(0, 12), fill="x", expand=True)
+        self.widgets["display_res_entry"] = self.e_res_custom
+        
+        self._cfg_slider(c0, "FPS", self.v_fps, 15, 240)
+        self._cfg_slider(c0, "Bitrate (Mbps)", self.v_bitrate, 1, 64)
         c1 = self._cfg_group(cols, "🔊 Audio y Pantalla", 1)
-        self._cfg_switch(c1, "Audio activado", self.v_audio)
-        self._cfg_option_menu(c1, "Fuente Audio", self.v_audio_source, ["output", "mic"])
-        self._cfg_option_menu(c1, "Codec Audio", self.v_audio_codec, ["opus", "aac", "raw"])
-        self._cfg_slider(c1, "Buffer audio (ms)", self.v_audio_buf, 0, 500)
-        self._cfg_entry(c1, "Display ID (0=Principal)", self.v_display_id)
-        self._cfg_switch(c1, "🖥️ Nueva Pantalla Virtual", self.v_virtual_display)
-        self._cfg_entry(c1, "Res. Virtual (Sugerido 1280x720)", self.v_virtual_display_res)
+        self.widgets["audio_switch"] = self._cfg_switch(c1, "Audio activado", self.v_audio)
+        self.widgets["audio_source"] = self._cfg_option_menu(c1, "Fuente Audio", self.v_audio_source, AUDIO_SOURCES)
+        self.widgets["audio_codec"] = self._cfg_option_menu(c1, "Codec Audio", self.v_audio_codec, AUDIO_CODECS)
+        self.widgets["audio_buf"] = self._cfg_slider(c1, "Buffer audio (ms)", self.v_audio_buf, 0, 500)
+        self.widgets["audio_dup"] = self._cfg_switch(c1, "🔊 Duplicar audio", self.v_audio_dup)
+        self.widgets["audio_bitrate"] = self._cfg_slider(c1, "Audio Bitrate (K)", self.v_audio_bitrate, 32, 320)
+        self.widgets["display_id"] = self._cfg_entry(c1, "Display ID (0=Principal)", self.v_display_id)
+        self.widgets["v_display_switch"] = self._cfg_switch(c1, "🖥️ Nueva Pantalla Virtual", self.v_virtual_display)
+        
+        # Resolución Virtual con Dropdown
+        ctk.CTkLabel(c1, text="Resolución Virtual", font=ctk.CTkFont(size=11), text_color=COLORS["text2"]).pack(anchor="w", padx=12, pady=(6, 0))
+        v_res_row = ctk.CTkFrame(c1, fg_color="transparent")
+        v_res_row.pack(fill="x", padx=12, pady=(2, 4))
+        self.v_res_menu = ctk.CTkOptionMenu(v_res_row, variable=self.v_virtual_res_preset, values=VIRTUAL_RES_PRESETS, width=100, fg_color=COLORS["card"], button_color=COLORS["border"], command=self._on_v_res_change)
+        self.v_res_menu.pack(side="left", padx=(0, 5))
+        self.widgets["v_res_menu"] = self.v_res_menu
+        
+        self.e_v_res_custom = ctk.CTkEntry(v_res_row, textvariable=self.v_virtual_display_res, width=70, fg_color=COLORS["card"], border_color=COLORS["border"], state="disabled")
+        self.e_v_res_custom.pack(side="left", fill="x", expand=True)
+        self.widgets["v_res_entry"] = self.e_v_res_custom
+
+        
+        # Selector de App para Pantalla Virtual
+        ctk.CTkLabel(c1, text="🚀 App en Pantalla Virtual", font=ctk.CTkFont(size=11), text_color=COLORS["text2"]).pack(anchor="w", padx=12, pady=(6, 0))
+        app_row = ctk.CTkFrame(c1, fg_color="transparent")
+        app_row.pack(fill="x", padx=12, pady=(2, 4))
+        
+        self.app_menu = ctk.CTkOptionMenu(app_row, values=["Ninguna", "Manual"], width=100, fg_color=COLORS["card"], button_color=COLORS["border"], command=self._on_v_app_change)
+        self.app_menu.pack(side="left", padx=(0, 5))
+        self.widgets["v_app_menu"] = self.app_menu
+        
+        self.btn_refresh_apps = ctk.CTkButton(app_row, text="🔄", width=32, height=32, fg_color=COLORS["bg"], hover_color=COLORS["border"], command=self._refresh_device_apps)
+        self.btn_refresh_apps.pack(side="left", padx=(0, 5))
+        self.widgets["v_app_refresh"] = self.btn_refresh_apps
+
+        self.e_v_app = ctk.CTkEntry(app_row, textvariable=self.v_virtual_display_app, width=70, fg_color=COLORS["card"], border_color=COLORS["border"], placeholder_text="com.package.name", state="disabled")
+        self.e_v_app.pack(side="left", fill="x", expand=True)
+        self.widgets["v_app_entry"] = self.e_v_app
+
         self.v_virtual_display_res.set("1280x720")
+        self.widgets["vd_dpi"] = self._cfg_entry(c1, "DPI Virtual Display", self.v_virtual_dpi)
+        self.widgets["vd_no_decorations"] = self._cfg_switch(c1, "Sin decoraciones VD", self.v_no_vd_decorations)
+        self.widgets["vd_no_destroy"] = self._cfg_switch(c1, "Conservar apps al cerrar", self.v_no_vd_destroy)
         self._cfg_switch(c1, "Pantalla completa", self.v_fullscreen); self._cfg_switch(c1, "Siempre al frente", self.v_always_on_top); self._cfg_switch(c1, "Sin bordes", self.v_borderless)
+        self.widgets["disable_screensaver"] = self._cfg_switch(c1, "🛡️ Desactivar screensaver", self.v_disable_screensaver)
         if not mgr.IS_WINDOWS:
             # Linux Only Features
             l_frame = ctk.CTkFrame(c1, fg_color=COLORS["border"], corner_radius=6)
@@ -332,13 +518,19 @@ class ScrcpyGUI(ctk.CTk):
             ctk.CTkLabel(l_frame, text="🐧 Sólo Linux", font=ctk.CTkFont(size=9, weight="bold"), text_color=COLORS["accent"]).pack(pady=(2,0))
             self._cfg_entry(l_frame, "V4L2 Sink", self.v_v4l2_device)
         c2 = self._cfg_group(cols, "🎛️ Controles y Graba", 2)
-        self._cfg_option_menu(c2, "Teclado", self.v_keyboard, ["", "uhid", "aoa", "disabled"])
-        self._cfg_option_menu(c2, "Ratón", self.v_mouse, ["", "uhid", "aoa", "disabled"])
-        self._cfg_switch(c2, "Gamepad (UHID)", self.v_gamepad)
-        self._cfg_switch(c2, "🔴 Grabar sesión", self.v_record)
-        self._cfg_entry(c2, "Archivo rec", self.v_record_file)
-        self._cfg_switch(c2, "Mostrar toques", self.v_show_touches)
-        self._cfg_entry(c2, "Crop (WxH:X:Y)", self.v_crop)
+        self.widgets["kb_menu"] = self._cfg_option_menu(c2, "Teclado", self.v_keyboard, KEYBOARD_MODES)
+        self.widgets["mouse_menu"] = self._cfg_option_menu(c2, "Ratón", self.v_mouse, MOUSE_MODES)
+        self.widgets["gamepad_menu"] = self._cfg_option_menu(c2, "Gamepad", self.v_gamepad, GAMEPAD_MODES)
+        self.widgets["no_control"] = self._cfg_switch(c2, "🚫 Solo lectura", self.v_no_control)
+        self.widgets["no_clipboard"] = self._cfg_switch(c2, "🚫 Sin clipboard sync", self.v_no_clipboard_sync)
+        self.widgets["record_switch"] = self._cfg_switch(c2, "🔴 Grabar sesión", self.v_record)
+        self.widgets["record_entry"] = self._cfg_entry(c2, "Archivo rec", self.v_record_file)
+        self.widgets["time_limit"] = self._cfg_slider(c2, "⏱ Tiempo límite (s)", self.v_time_limit, 0, 600)
+        self.widgets["touches_switch"] = self._cfg_switch(c2, "Mostrar toques", self.v_show_touches)
+        self.widgets["crop_entry"] = self._cfg_entry(c2, "Crop (WxH:X:Y)", self.v_crop)
+        self.widgets["video_buffer"] = self._cfg_slider(c2, "Video Buffer (ms)", self.v_video_buffer, 0, 500)
+        self.widgets["no_video"] = self._cfg_switch(c2, "🚫 Sin video", self.v_no_video)
+
 
     def _cfg_group(self, parent, title, col):
         f = ctk.CTkFrame(parent, fg_color=COLORS["bg"], corner_radius=10); f.grid(row=0, column=col, sticky="nsew", padx=4, pady=4)
@@ -349,23 +541,33 @@ class ScrcpyGUI(ctk.CTk):
         ctk.CTkLabel(parent, text=label, font=ctk.CTkFont(size=11), text_color=COLORS["text2"]).pack(anchor="w", padx=12, pady=(6, 0))
         m = ctk.CTkOptionMenu(parent, variable=var, values=values, width=180, fg_color=COLORS["card"], button_color=COLORS["border"], command=lambda _: self._update_command())
         m.pack(padx=12, pady=(2, 4), anchor="w")
+        return m
+
 
     def _cfg_entry(self, parent, label, var):
         ctk.CTkLabel(parent, text=label, font=ctk.CTkFont(size=11), text_color=COLORS["text2"]).pack(anchor="w", padx=12, pady=(6, 0))
         e = ctk.CTkEntry(parent, textvariable=var, width=180, fg_color=COLORS["card"], border_color=COLORS["border"])
         e.pack(padx=12, pady=(2, 4), anchor="w"); var.trace_add("write", lambda *_: self._update_command())
+        return e
+
 
     def _cfg_slider(self, parent, label, var, from_, to):
         row = ctk.CTkFrame(parent, fg_color="transparent"); row.pack(fill="x", padx=12, pady=(6, 4))
         ctk.CTkLabel(row, text=label, font=ctk.CTkFont(size=11), text_color=COLORS["text2"]).pack(side="left")
         val_label = ctk.CTkLabel(row, text=str(var.get()), font=ctk.CTkFont(size=11, weight="bold"), text_color=COLORS["accent"], width=40); val_label.pack(side="right")
         def on_slide(v): var.set(int(float(v))); val_label.configure(text=str(int(float(v)))); self._update_command()
-        ctk.CTkSlider(parent, from_=from_, to=to, variable=var, width=180, command=on_slide, progress_color=COLORS["accent"], button_color=COLORS["accent"]).pack(padx=12, anchor="w")
+        s = ctk.CTkSlider(parent, from_=from_, to=to, variable=var, width=180, command=on_slide, progress_color=COLORS["accent"], button_color=COLORS["accent"])
+        s.pack(padx=12, anchor="w")
+        return s
+
 
     def _cfg_switch(self, parent, label, var):
         row = ctk.CTkFrame(parent, fg_color="transparent"); row.pack(fill="x", padx=12, pady=(4, 2))
         ctk.CTkLabel(row, text=label, font=ctk.CTkFont(size=11), text_color=COLORS["text2"]).pack(side="left")
-        ctk.CTkSwitch(row, text="", variable=var, width=40, progress_color=COLORS["accent"], command=self._update_command).pack(side="right")
+        sw = ctk.CTkSwitch(row, text="", variable=var, width=40, progress_color=COLORS["accent"], command=self._update_command)
+        sw.pack(side="right")
+        return sw
+
 
     def _build_quick_settings(self):
         f = ctk.CTkFrame(self.scroll, fg_color="transparent")
@@ -397,6 +599,130 @@ class ScrcpyGUI(ctk.CTk):
         self.log_box.pack(fill="x", pady=(4, 0)); self.log_box.insert("end", "Listo. Selecciona un modo e inicia.\n"); self.log_box.configure(state="disabled")
         if not mgr.get_scrcpy_path(): self._log("⚠️ scrcpy no encontrado. Usa 'Descargar scrcpy' arriba.")
 
+        self._update_ui_states()
+        self._update_command()
+
+    def _on_res_change(self, val):
+        if val == "Personalizada":
+            self.e_res_custom.configure(state="normal", border_color=COLORS["accent"])
+        else:
+            self.e_res_custom.configure(state="disabled", border_color=COLORS["border"])
+            m = re.search(r'(\d+)', val)
+            if m: self.v_max_size.set(m.group(1))
+            elif val == "Original": self.v_max_size.set("0")
+        self._debounced_update()
+
+    def _on_v_res_change(self, val):
+        if val == "Personalizada":
+            self.e_v_res_custom.configure(state="normal", border_color=COLORS["accent"])
+        else:
+            self.e_v_res_custom.configure(state="disabled", border_color=COLORS["border"])
+            if "x" in val:
+                res = val.split(" ")[0] # Remove (Portrait) if exists
+                self.v_virtual_display_res.set(res)
+        self._debounced_update()
+
+    def _set_widget_state(self, key, state):
+        """Helper to only configure widget if state actually changes."""
+        if key in self.widgets:
+            widget = self.widgets[key]
+            # CustomTkinter uses 'state', but let's be careful with internal types
+            try:
+                current = widget.cget("state")
+                if current != state:
+                    widget.configure(state=state)
+            except Exception:
+                widget.configure(state=state)
+
+    def _update_ui_states(self):
+        """Enable or disable widgets based on exclusionary logic from scrcpy documentation."""
+        if not hasattr(self, 'widgets') or not self.widgets: return
+
+        is_camera = self.v_video_source.get() == "camera"
+        audio_enabled = self.v_audio.get()
+        v_display_enabled = self.v_virtual_display.get()
+        no_control = self.v_no_control.get()
+
+        # Camera Mode Exclusions
+        cam_state = "disabled" if is_camera else "normal"
+        for key in ["display_res_menu", "display_res_entry", "display_id", "v_display_switch", "crop_entry"]:
+            self._set_widget_state(key, cam_state)
+
+        # Camera-specific controls
+        cam_only_state = "normal" if is_camera else "disabled"
+        for key in ["camera_id", "camera_facing", "camera_fps"]:
+            self._set_widget_state(key, cam_only_state)
+
+        # Mutual exclusivity for camera facing/id
+        if is_camera:
+            cid = self.v_camera_id.get().strip()
+            if cid and cid != "0":
+                self._set_widget_state("camera_facing", "disabled")
+
+        # Controls disabled when camera or no_control
+        ctrl_state = "disabled" if (is_camera or no_control) else "normal"
+        for key in ["kb_menu", "mouse_menu", "gamepad_menu"]:
+            self._set_widget_state(key, ctrl_state)
+
+        if is_camera:
+            self.v_keyboard.set("disabled")
+            self.v_mouse.set("disabled")
+            self.v_gamepad.set("disabled")
+
+        # Audio Exclusions
+        aud_state = "normal" if audio_enabled else "disabled"
+        for key in ["audio_source", "audio_codec", "audio_buf", "audio_dup", "audio_bitrate"]:
+            self._set_widget_state(key, aud_state)
+
+        # Virtual Display Exclusions
+        vd_state = "normal" if v_display_enabled and not is_camera else "disabled"
+        for key in ["v_res_menu", "v_res_entry", "v_app_menu", "v_app_refresh", "v_app_entry", "vd_dpi", "vd_no_decorations", "vd_no_destroy"]:
+            self._set_widget_state(key, vd_state)
+        
+        # Virtual Display vs Display ID
+        if not is_camera and v_display_enabled:
+            self._set_widget_state("display_id", "disabled")
+            self.v_display_id.set("0")
+
+        # Record-related
+        rec_enabled = self.v_record.get()
+        rec_state = "normal" if rec_enabled else "disabled"
+        for key in ["record_entry", "time_limit"]:
+            self._set_widget_state(key, rec_state)
+
+
+    def _on_v_app_change(self, val):
+        if val == "Manual":
+            self.e_v_app.configure(state="normal", border_color=COLORS["accent"])
+        elif val == "Ninguna":
+            self.e_v_app.configure(state="disabled", border_color=COLORS["border"])
+            self.v_virtual_display_app.set("")
+        else:
+            self.e_v_app.configure(state="disabled", border_color=COLORS["border"])
+            if val in self.app_list_data:
+                self.v_virtual_display_app.set(self.app_list_data[val])
+        self._debounced_update()
+
+    def _refresh_device_apps(self):
+        dev = self.v_device.get().split(" (")[0]
+        if not dev or "Buscando" in dev:
+            self._log("⚠️ Conecta un dispositivo primero.")
+            return
+        
+        self.btn_refresh_apps.configure(state="disabled", text="⌛")
+        def _task():
+            apps = mgr.get_installed_apps(dev)
+            self.app_list_data = {name: pkg for name, pkg in apps}
+            names = ["Ninguna"] + [name for name, _ in apps] + ["Manual"]
+            self.after(0, lambda: self._finish_refresh(names))
+        
+        threading.Thread(target=_task, daemon=True).start()
+
+    def _finish_refresh(self, names):
+        self.app_menu.configure(values=names)
+        self.btn_refresh_apps.configure(state="normal", text="🔄")
+        self._log(f"✅ {len(names)-2} aplicaciones detectadas.")
+
     def _build_args(self):
         args = []
         # Device
@@ -404,107 +730,213 @@ class ScrcpyGUI(ctk.CTk):
         if dev and "Buscando" not in dev and "Sin dispositivos" not in dev:
             args.extend(["-s", dev])
 
+        # No video mode
+        if self.v_no_video.get():
+            args.append("--no-video")
+
         # Video Source
         src = self.v_video_source.get()
         if src == "camera":
             args.append("--video-source=camera")
             cid = self.v_camera_id.get().strip()
-            if cid: args.append(f"--camera-id={cid}")
+            if cid and cid != "0":
+                args.append(f"--camera-id={cid}")
+            else:
+                facing = self.v_camera_facing.get()
+                if facing: args.append(f"--camera-facing={facing}")
+            cam_fps = self.v_camera_fps.get()
+            if cam_fps and cam_fps != 30: args.append(f"--camera-fps={cam_fps}")
         else:
             ms = self.v_max_size.get().strip()
             if ms and ms != "0": args.append(f"--max-size={ms}")
             did = self.v_display_id.get().strip()
             if did and did != "0": args.append(f"--display-id={did}")
 
-        codec = self.v_codec.get(); 
+        codec = self.v_codec.get()
         if codec and codec != "h264": args.append(f"--video-codec={codec}")
         fps = self.v_fps.get()
         if fps: args.append(f"--max-fps={fps}")
         br = self.v_bitrate.get()
         if br and br != 8: args.append(f"--video-bit-rate={br}M")
-        
-        if not self.v_audio.get(): args.append("--no-audio")
+
+        # Orientation
+        orient = self.v_orientation.get()
+        if orient and orient != "0": args.append(f"--orientation={orient}")
+
+        # Audio
+        if not self.v_audio.get():
+            args.append("--no-audio")
         else:
-            src = self.v_audio_source.get()
-            if src != "output": args.append(f"--audio-source={src}")
+            audio_src = self.v_audio_source.get()
+            if audio_src != "output": args.append(f"--audio-source={audio_src}")
             ac = self.v_audio_codec.get()
             if ac != "opus": args.append(f"--audio-codec={ac}")
             ab = self.v_audio_buf.get()
             if ab > 0: args.append(f"--audio-buffer={ab}")
-        
-        vb = self.v_video_buf.get()
+            abr = self.v_audio_bitrate.get()
+            if abr != 128: args.append(f"--audio-bit-rate={abr}K")
+            if self.v_audio_dup.get(): args.append("--audio-dup")
+
+        # Video buffer (replaces removed --display-buffer)
+        vb = self.v_video_buffer.get()
         if vb > 0: args.append(f"--video-buffer={vb}")
+
+        # Window
         if self.v_fullscreen.get(): args.append("--fullscreen")
         if self.v_always_on_top.get(): args.append("--always-on-top")
         if self.v_borderless.get(): args.append("--window-borderless")
+        if self.v_disable_screensaver.get(): args.append("--disable-screensaver")
         if self.v_stay_awake.get(): args.append("--stay-awake")
         if self.v_screen_off.get(): args.append("--turn-screen-off")
-        
-        if self.v_virtual_display.get():
-            res = self.v_virtual_display_res.get().strip() or "1920x1080"
-            args.append(f"--new-display={res}")
-        
+
+        # Virtual Display
+        if self.v_virtual_display.get() and src != "camera":
+            res = self.v_virtual_display_res.get().strip() or "1280x720"
+            dpi = self.v_virtual_dpi.get().strip()
+            vd_val = f"{res}/{dpi}" if dpi else res
+            args.append(f"--new-display={vd_val}")
+            v_app = self.v_virtual_display_app.get().strip()
+            if v_app: args.append(f"--start-app={v_app}")
+            if self.v_no_vd_decorations.get(): args.append("--no-vd-system-decorations")
+            if self.v_no_vd_destroy.get(): args.append("--no-vd-destroy-content")
+
         if not mgr.IS_WINDOWS and self.v_v4l2_device.get().strip():
             args.append(f"--v4l2-sink={self.v_v4l2_device.get().strip()}")
-        
-        kb = self.v_keyboard.get()
-        if kb: args.append(f"--keyboard={kb}")
-        ms2 = self.v_mouse.get()
-        if ms2: args.append(f"--mouse={ms2}")
-        if self.v_gamepad.get(): args.append("--gamepad=uhid")
-        
+
+        # Controls
+        if self.v_no_control.get() or src == "camera":
+            args.append("--no-control")
+        else:
+            kb = self.v_keyboard.get()
+            if kb and kb != "sdk": args.append(f"--keyboard={kb}")
+            ms2 = self.v_mouse.get()
+            if ms2 and ms2 != "sdk": args.append(f"--mouse={ms2}")
+            gp = self.v_gamepad.get()
+            if gp: args.append(f"--gamepad={gp}")
+
+        if self.v_no_clipboard_sync.get(): args.append("--no-clipboard-autosync")
+
+        # Recording
         if self.v_record.get():
             rf = self.v_record_file.get().strip() or "recording.mp4"
+            rf = datetime.now().strftime(rf)
             args.append(f"--record={rf}")
-        
+        tl = self.v_time_limit.get()
+        if tl > 0: args.append(f"--time-limit={tl}")
+
         if self.v_print_fps.get(): args.append("--print-fps")
         if self.v_show_touches.get(): args.append("--show-touches")
         crop = self.v_crop.get().strip()
-        if crop: args.append(f"--crop={crop}")
+        if crop and src != "camera": args.append(f"--crop={crop}")
         return args
 
+
+
     def _update_command(self):
-        args = self._build_args(); exe = mgr.get_scrcpy_path() or "scrcpy"
+        args = self._build_args()
+        exe = self._scrcpy_path_cache or "scrcpy"
         self.cmd_label.configure(text=" ".join([os.path.basename(exe)] + args))
 
     def _copy_command(self):
         args = self._build_args(); exe = mgr.get_scrcpy_path() or "scrcpy"
         self.clipboard_clear(); self.clipboard_append(" ".join([exe] + args)); self._log("📋 Comando copiado.")
 
+    def _schedule_log_updater(self):
+        """Start the periodic log updater."""
+        self._log_updater_running = True
+        self._process_log_queue()
+
+    def _process_log_queue(self):
+        """Batch process logs from the queue to the text box."""
+        if not self._log_updater_running: return
+        
+        batch = []
+        try:
+            while not self.log_queue.empty():
+                batch.append(self.log_queue.get_nowait())
+                if len(batch) > 50: break # Process max 50 lines at a time
+        except queue.Empty:
+            pass
+        
+        if batch:
+            self.log_box.configure(state="normal")
+            self.log_box.insert("end", "\n".join(batch) + "\n")
+            self.log_box.see("end")
+            self.log_box.configure(state="disabled")
+            
+        self.after(100, self._process_log_queue)
+
     def _log(self, msg):
-        self.log_box.configure(state="normal"); self.log_box.insert("end", msg + "\n"); self.log_box.see("end"); self.log_box.configure(state="disabled")
+        """Add a message to the log queue."""
+        self.log_queue.put(msg)
 
     def _launch(self):
         scrcpy_path = mgr.get_scrcpy_path()
         if not scrcpy_path: self._log("❌ scrcpy.exe no encontrado."); return
         if self.process and self.process.poll() is None: self._log("⚠️ scrcpy ya está en ejecución."); return
+        
         args = [scrcpy_path] + self._build_args()
         self._log(f"▶ Ejecutando: {' '.join(args)}")
-        self.btn_launch.pack_forget(); self.btn_stop.pack(fill="x", pady=(0, 4), before=self.log_box)
+        
+        # UI state change
+        self.btn_launch.pack_forget()
+        self.btn_stop.configure(state="normal", text="⏹  Detener")
+        self.btn_stop.pack(fill="x", pady=(0, 4), before=self.log_box)
+        
         def run():
             try:
                 kwargs = {
                     "stdout": subprocess.PIPE,
                     "stderr": subprocess.STDOUT,
                     "text": True,
-                    "cwd": os.path.dirname(scrcpy_path)
+                    "cwd": os.path.dirname(scrcpy_path),
+                    "bufsize": 1 # Line buffered
                 }
                 if mgr.IS_WINDOWS:
                     kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
                 
                 self.process = subprocess.Popen(args, **kwargs)
-                for line in self.process.stdout: self.after(0, self._log, line.rstrip())
+                
+                # Reading stdout line by line
+                for line in iter(self.process.stdout.readline, ''):
+                    if line: self._log(line.rstrip())
+                
                 self.process.wait()
-                self.after(0, self._log, f"⏹ scrcpy terminó (código {self.process.returncode})")
-            except Exception as e: self.after(0, self._log, f"❌ Error: {e}")
-            finally: self.after(0, self._on_process_end)
+                self._log(f"⏹ scrcpy terminó (código {self.process.returncode})")
+            except Exception as e:
+                self._log(f"❌ Error: {e}")
+            finally:
+                self.after(0, self._on_process_end)
+                
         threading.Thread(target=run, daemon=True).start()
 
     def _on_process_end(self):
-        self.process = None; self.btn_stop.pack_forget(); self.btn_launch.pack(fill="x", pady=(0, 4), before=self.log_box)
+        self.process = None
+        self.btn_stop.pack_forget()
+        self.btn_launch.pack(fill="x", pady=(0, 4), before=self.log_box)
+        self.btn_stop.configure(state="normal", text="⏹  Detener")
 
     def _stop(self):
-        if self.process and self.process.poll() is None: self.process.terminate(); self._log("⏹ Deteniendo scrcpy...")
+        if self.process and self.process.poll() is None:
+            self.btn_stop.configure(state="disabled", text="⌛ Deteniendo...")
+            self._log("⏹ Deteniendo scrcpy...")
+            
+            def force_kill():
+                if not self.process: return
+                try:
+                    self.process.terminate()
+                    # Wait up to 2 seconds for termination
+                    for _ in range(20):
+                        if self.process.poll() is not None: return
+                        time.sleep(0.1)
+                    
+                    if self.process.poll() is None:
+                        self._log("⚠️ No responde, forzando cierre...")
+                        self.process.kill()
+                except Exception as e:
+                    self._log(f"⚠️ Error al detener: {e}")
+
+            threading.Thread(target=force_kill, daemon=True).start()
 
 
     def _build_wireless(self):
