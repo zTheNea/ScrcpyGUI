@@ -1,5 +1,5 @@
 """Manages scrcpy download, detection and updates from GitHub."""
-import os, json, shutil, zipfile, urllib.request, threading, platform, ssl, subprocess, re
+import os, json, shutil, zipfile, urllib.request, threading, platform, ssl, subprocess, re, time
 
 GITHUB_API = "https://api.github.com/repos/Genymobile/scrcpy/releases/latest"
 
@@ -135,6 +135,34 @@ def _get_adb_path():
     if os.path.isfile(adb): return adb
     return shutil.which("adb")
 
+def get_device_model(serial):
+    """Get the real device model name via ADB getprop (e.g. 'Samsung Galaxy S24')."""
+    try:
+        adb = _get_adb_path() or "adb"
+        kw = _subprocess_kwargs()
+        # Try manufacturer + model for a full name
+        r_brand = subprocess.run(
+            [adb, "-s", serial, "shell", "getprop", "ro.product.brand"],
+            capture_output=True, text=True, timeout=3, **kw
+        )
+        r_model = subprocess.run(
+            [adb, "-s", serial, "shell", "getprop", "ro.product.model"],
+            capture_output=True, text=True, timeout=3, **kw
+        )
+        brand = r_brand.stdout.strip().capitalize()
+        model = r_model.stdout.strip()
+        if brand and model:
+            # Avoid duplicating brand in model (e.g. "Samsung Samsung Galaxy...")
+            if model.lower().startswith(brand.lower()):
+                return model
+            return f"{brand} {model}"
+        if model:
+            return model
+    except Exception:
+        pass
+    return None
+
+
 def list_devices():
     """Returns a list of (serial, model) for connected devices."""
     try:
@@ -150,11 +178,17 @@ def list_devices():
                 continue
             parts = line.split()
             serial = parts[0]
-            model = "Unknown"
-            for p in parts:
-                if p.startswith("model:"):
-                    model = p.split(":")[1]
-                    break
+            # Try to get real model name via getprop
+            real_model = get_device_model(serial)
+            if real_model:
+                model = real_model
+            else:
+                # Fallback to the model: tag from adb devices -l
+                model = "Unknown"
+                for p in parts:
+                    if p.startswith("model:"):
+                        model = p.split(":")[1].replace("_", " ")
+                        break
             devices.append((serial, model))
         return devices
     except Exception:
@@ -186,8 +220,35 @@ def pair_wifi(ip_port, code):
     except Exception as e:
         return str(e)
 
+def _extract_ip(text):
+    """Extracts the first non-loopback IPv4 from text using multiple patterns."""
+    if not text: return None
+    # 1. Prioritize 'src' (from ip route get)
+    m = re.search(r'src\s+(\d{1,3}(?:\.\d{1,3}){3})', text)
+    if m: return m.group(1)
+    
+    # 2. Try 'inet ' (from ip addr show)
+    # Filter out common internal/virtual IPs
+    for m in re.finditer(r'inet\s+(\d{1,3}(?:\.\d{1,3}){3})', text):
+        ip = m.group(1)
+        if ip not in ["127.0.0.1", "0.0.0.0"] and not ip.startswith("169.254"):
+            return ip
+        
+    # 3. Try 'inet addr:' (from ifconfig)
+    for m in re.finditer(r'inet addr:(\d{1,3}(?:\.\d{1,3}){3})', text):
+        ip = m.group(1)
+        if ip not in ["127.0.0.1", "0.0.0.0"]:
+            return ip
+            
+    # 4. Try any raw IP match as last resort
+    for m in re.finditer(r'\b(\d{1,3}(?:\.\d{1,3}){3})\b', text):
+        ip = m.group(1)
+        if ip not in ["127.0.0.1", "0.0.0.0"] and not ip.startswith("169.254"):
+            return ip
+    return None
+
 def enable_tcpip(serial):
-    """Runs adb tcpip 5555, gets IP, and connects."""
+    """Runs adb tcpip 5555, gets IP using multiple methods, and connects."""
     try:
         adb = _get_adb_path()
         if not adb: return "ADB no encontrado"
@@ -196,22 +257,43 @@ def enable_tcpip(serial):
         # 1. Enable TCP/IP
         subprocess.run([adb, "-s", serial, "tcpip", "5555"], capture_output=True, text=True, timeout=10, **kw)
         
-        # 2. Get IP address
-        r_ip = subprocess.run([adb, "-s", serial, "shell", "ip", "addr", "show", "wlan0"], capture_output=True, text=True, timeout=5, **kw)
-        ip_match = re.search(r'inet\s+(\d+\.\d+\.\d+\.\d+)', r_ip.stdout)
-        if not ip_match:
-            # Try alternative command for some devices
-            r_ip = subprocess.run([adb, "-s", serial, "shell", "ifconfig", "wlan0"], capture_output=True, text=True, timeout=5, **kw)
-            ip_match = re.search(r'inet addr:(\d+\.\d+\.\d+\.\d+)', r_ip.stdout)
+        # IMPORTANT: Wait for adbd to restart on the device. 
+        # Without this, the next 'adb shell' command might fail or return empty.
+        time.sleep(1.5)
+        
+        # 2. Try multiple ways to get IP address
+        ip = None
+        
+        # Method A: ip route get (finds the IP used for active network)
+        r = subprocess.run([adb, "-s", serial, "shell", "ip", "route", "get", "1.1.1.1"], capture_output=True, text=True, timeout=5, **kw)
+        ip = _extract_ip(r.stdout)
+        
+        if not ip:
+            # Method B: getprop dhcp.wlan0.ipaddress
+            r = subprocess.run([adb, "-s", serial, "shell", "getprop", "dhcp.wlan0.ipaddress"], capture_output=True, text=True, timeout=5, **kw)
+            val = r.stdout.strip()
+            if re.match(r'^\d+\.\d+\.\d+\.\d+$', val) and val != "0.0.0.0":
+                ip = val
+                
+        if not ip:
+            # Method C: ip addr show wlan0 (or variations)
+            for iface in ["wlan0", "wlan1", "eth0", "p2p-wlan0-0", "ra0"]:
+                r = subprocess.run([adb, "-s", serial, "shell", "ip", "addr", "show", iface], capture_output=True, text=True, timeout=5, **kw)
+                ip = _extract_ip(r.stdout)
+                if ip: break
             
-        if ip_match:
-            ip = ip_match.group(1)
+        if not ip:
+            # Method D: generic ip addr show (last resort)
+            r = subprocess.run([adb, "-s", serial, "shell", "ip", "addr", "show"], capture_output=True, text=True, timeout=5, **kw)
+            ip = _extract_ip(r.stdout)
+
+        if ip:
             # 3. Connect
             subprocess.run([adb, "connect", f"{ip}:5555"], capture_output=True, text=True, timeout=10, **kw)
             return f"Conectado a {ip} vía Wi-Fi"
         return "Modo TCP/IP activo, pero no pude obtener la IP automáticamente. Conéctate manualmente."
     except Exception as e:
-        return str(e)
+        return f"Error: {str(e)}"
 
 def get_installed_apps(device_id):
     """Escáner Universal Triple: Máxima compatibilidad Android."""
