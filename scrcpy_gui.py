@@ -1054,16 +1054,17 @@ class ScrcpyGUI(ctk.CTk):
             self._log("⏹ Deteniendo scrcpy...")
             
             def force_kill():
-                if not self.process: return
+                proc = self.process
+                if not proc: return
                 try:
-                    self.process.terminate()
+                    proc.terminate()
                     for _ in range(20):
-                        if self.process.poll() is not None: return
+                        if proc.poll() is not None: return
                         time.sleep(0.1)
                     
-                    if self.process.poll() is None:
+                    if proc.poll() is None:
                         self._log("⚠️ No responde, forzando cierre...")
-                        self.process.kill()
+                        proc.kill()
                 except Exception as e:
                     self._log(f"⚠️ Error al detener: {e}")
 
