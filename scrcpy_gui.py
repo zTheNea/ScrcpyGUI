@@ -156,6 +156,8 @@ class ScrcpyGUI(ctk.CTk):
 
         self.active_mode = ctk.StringVar(value="")
         self.process = None
+        self.active_sessions = {}
+        self._session_counter = 0
         self._process_lock = threading.Lock()
         self.mode_buttons = {}
 
@@ -357,6 +359,9 @@ class ScrcpyGUI(ctk.CTk):
         ctk.CTkButton(mid, text="📷 Cámaras", width=80, height=26, fg_color=COLORS["bg"], border_width=1, border_color=COLORS["border"], font=ctk.CTkFont(size=10), hover_color=COLORS["card_hover"], command=lambda: self._run_inspector("--list-cameras")).pack(side="left", padx=2, pady=10)
         ctk.CTkButton(mid, text="🖥️ Pantallas", width=80, height=26, fg_color=COLORS["bg"], border_width=1, border_color=COLORS["border"], font=ctk.CTkFont(size=10), hover_color=COLORS["card_hover"], command=lambda: self._run_inspector("--list-displays")).pack(side="left", padx=2, pady=10)
         ctk.CTkButton(mid, text="⚡ Modo PC", width=80, height=26, fg_color=COLORS["bg"], border_width=1, border_color=COLORS["accent"], text_color=COLORS["accent"], font=ctk.CTkFont(size=10, weight="bold"), hover_color=COLORS["card_hover"], command=self._enable_pc_mode).pack(side="left", padx=2, pady=10)
+        
+        self.lbl_active_displays = ctk.CTkLabel(mid, text="🪟 0 abiertas", font=ctk.CTkFont(size=10, weight="bold"), text_color=COLORS["muted"])
+        self.lbl_active_displays.pack(side="left", padx=(8, 2), pady=10)
 
         # Right: Run Button + Updater
         right = ctk.CTkFrame(top, fg_color="transparent")
@@ -388,11 +393,11 @@ class ScrcpyGUI(ctk.CTk):
         self.btn_launch.pack(side="right", pady=9)
         
         self.btn_stop = ctk.CTkButton(
-            right, text="⏹ Detener", width=135, height=30,
-            font=ctk.CTkFont(size=12, weight="bold"), fg_color=COLORS["danger"],
-            hover_color="#dc2626", corner_radius=6, command=self._stop
+            right, text="⏹ Detener Todo", width=120, height=30,
+            font=ctk.CTkFont(size=11, weight="bold"), fg_color=COLORS["danger"],
+            hover_color="#dc2626", corner_radius=6, command=self._stop_all_sessions
         )
-        self.btn_stop.pack(side="right", pady=9)
+        self.btn_stop.pack(side="right", padx=(0, 6), pady=9)
         self.btn_stop.pack_forget()
 
         self.after(500, self._refresh_devices)
@@ -533,6 +538,14 @@ class ScrcpyGUI(ctk.CTk):
             hover_color=COLORS["danger"], command=self._clear_selected_app
         )
         self.btn_pv_clear_app.pack(side="left")
+
+        self.btn_pv_spawn = ctk.CTkButton(
+            self.pv_app_card, text="➕ Abrir como Nueva Pantalla Virtual", height=30,
+            font=ctk.CTkFont(size=11, weight="bold"), fg_color=COLORS["card"],
+            border_width=1, border_color=COLORS["accent"], text_color=COLORS["accent"],
+            hover_color=COLORS["card_hover"], command=self._launch
+        )
+        self.btn_pv_spawn.pack(fill="x", padx=14, pady=(0, 10))
 
         # Quick Toggles for the preset
         toggles_card = ctk.CTkFrame(self.preset_view, fg_color=COLORS["bg"], corner_radius=8, border_width=1, border_color=COLORS["border"])
@@ -982,6 +995,7 @@ class ScrcpyGUI(ctk.CTk):
         self.tabview.add("🔊 Audio")
         self.tabview.add("🖥️ Pantalla")
         self.tabview.add("🎛️ Controles")
+        self.tabview.add("🪟 Pantallas Activas")
         self.tabview.add("📶 Wi-Fi")
         self.tabview.add("💾 Perfiles")
 
@@ -989,6 +1003,7 @@ class ScrcpyGUI(ctk.CTk):
         self._build_tab_audio(self.tabview.tab("🔊 Audio"))
         self._build_tab_display(self.tabview.tab("🖥️ Pantalla"))
         self._build_tab_controls(self.tabview.tab("🎛️ Controles"))
+        self._build_tab_sessions(self.tabview.tab("🪟 Pantallas Activas"))
         self._build_tab_wifi(self.tabview.tab("📶 Wi-Fi"))
         self._build_tab_profiles(self.tabview.tab("💾 Perfiles"))
 
@@ -1316,6 +1331,114 @@ class ScrcpyGUI(ctk.CTk):
         self._update_ui_states()
         self._update_command()
 
+    def _build_tab_sessions(self, tab):
+        """Display & Multi-Instance Session Manager Tab."""
+        # Top toolbar
+        toolbar = ctk.CTkFrame(tab, fg_color="transparent")
+        toolbar.pack(fill="x", padx=6, pady=(4, 8))
+        
+        ctk.CTkLabel(
+            toolbar, text="🪟 Gestor de Pantallas y Sesiones Abiertas",
+            font=ctk.CTkFont(size=13, weight="bold"), text_color=COLORS["text"]
+        ).pack(side="left", padx=4)
+        
+        self.btn_stop_all = ctk.CTkButton(
+            toolbar, text="⏹ Detener Todas", width=120, height=28,
+            fg_color=COLORS["danger"], hover_color="#dc2626", font=ctk.CTkFont(size=11, weight="bold"),
+            command=self._stop_all_sessions
+        )
+        self.btn_stop_all.pack(side="right", padx=4)
+
+        self.btn_new_display = ctk.CTkButton(
+            toolbar, text="➕ Nueva Pantalla Virtual", width=160, height=28,
+            fg_color=COLORS["accent"], text_color=COLORS["bg"], font=ctk.CTkFont(size=11, weight="bold"),
+            hover_color="#06b6d4", command=self._create_new_virtual_display
+        )
+        self.btn_new_display.pack(side="right", padx=4)
+
+        # Scrollable list of active session cards
+        self.sessions_scroll = ctk.CTkScrollableFrame(tab, fg_color="transparent")
+        self.sessions_scroll.pack(fill="both", expand=True, padx=6, pady=4)
+        
+        self._update_sessions_ui()
+
+    def _update_sessions_ui(self):
+        """Refresh the session manager tab and topbar session count badge."""
+        if not hasattr(self, "sessions_scroll"):
+            return
+            
+        with self._process_lock:
+            sessions = list(self.active_sessions.values())
+
+        # Update topbar badge and stop button
+        num = len(sessions)
+        if hasattr(self, "lbl_active_displays"):
+            if num > 0:
+                self.lbl_active_displays.configure(text=f"🪟 {num} abierta{'s' if num > 1 else ''}", text_color=COLORS["green"])
+            else:
+                self.lbl_active_displays.configure(text="🪟 0 abiertas", text_color=COLORS["muted"])
+
+        if hasattr(self, "btn_stop"):
+            if num > 0:
+                self.btn_stop.pack(side="right", padx=(0, 6), pady=9)
+            else:
+                self.btn_stop.pack_forget()
+
+        if hasattr(self, "btn_stop_all"):
+            self.btn_stop_all.configure(state="normal" if num > 0 else "disabled")
+
+        for child in self.sessions_scroll.winfo_children():
+            child.destroy()
+
+        if not sessions:
+            empty_frame = ctk.CTkFrame(self.sessions_scroll, fg_color=COLORS["card"], corner_radius=8, border_width=1, border_color=COLORS["border"])
+            empty_frame.pack(fill="x", padx=10, pady=20)
+            ctk.CTkLabel(empty_frame, text="🖥️", font=ctk.CTkFont(size=36)).pack(pady=(16, 4))
+            ctk.CTkLabel(empty_frame, text="No hay pantallas abiertas actualmente", font=ctk.CTkFont(size=13, weight="bold"), text_color=COLORS["text"]).pack()
+            ctk.CTkLabel(empty_frame, text="Haz clic en '+ Nueva Pantalla Virtual' o inicia cualquier preset para comenzar.", font=ctk.CTkFont(size=11), text_color=COLORS["muted"]).pack(pady=(2, 16))
+            return
+
+        for s in sessions:
+            sid = s["id"]
+            title = s["title"]
+            app = s.get("app_pkg", "")
+            pid = s.get("proc").pid if s.get("proc") else "--"
+            st_time = s.get("start_time", "")
+            mode = s.get("mode", "virtual")
+            
+            card = ctk.CTkFrame(self.sessions_scroll, fg_color=COLORS["card"], corner_radius=8, border_width=1, border_color=COLORS["border"], height=58)
+            card.pack(fill="x", pady=4, padx=4)
+            card.pack_propagate(False)
+            
+            # Left: Icon + Title + Meta
+            left_f = ctk.CTkFrame(card, fg_color="transparent")
+            left_f.pack(side="left", fill="both", expand=True, padx=12, pady=6)
+            
+            title_row = ctk.CTkFrame(left_f, fg_color="transparent")
+            title_row.pack(fill="x")
+            
+            bdg = ctk.CTkLabel(title_row, text="● ACTIVA", font=ctk.CTkFont(size=10, weight="bold"), text_color=COLORS["green"])
+            bdg.pack(side="left", padx=(0, 6))
+            
+            lbl_title = ctk.CTkLabel(title_row, text=title, font=ctk.CTkFont(size=12, weight="bold"), text_color=COLORS["text"], anchor="w")
+            lbl_title.pack(side="left", fill="x")
+            
+            lbl_sub = ctk.CTkLabel(
+                left_f,
+                text=f"PID: {pid} | Modo: {str(mode).upper()} | Iniciada: {st_time}" + (f" | App: {app}" if app else ""),
+                font=ctk.CTkFont(size=10), text_color=COLORS["muted"], anchor="w"
+            )
+            lbl_sub.pack(anchor="w")
+            
+            # Right: Close button
+            btn_close = ctk.CTkButton(
+                card, text="⏹ Cerrar", width=80, height=28,
+                fg_color=COLORS["card_hover"], hover_color=COLORS["danger"],
+                border_width=1, border_color=COLORS["border"], font=ctk.CTkFont(size=11),
+                command=lambda s_id=sid: self._stop_session(s_id)
+            )
+            btn_close.pack(side="right", padx=12, pady=12)
+
     def _clear_log(self):
         """Clear all messages from the log console."""
         self.log_box.configure(state="normal")
@@ -1615,27 +1738,34 @@ class ScrcpyGUI(ctk.CTk):
             self._insert_log_batch([msg])
 
     # ─────────────────────────────────────────────
-    #  LAUNCH / STOP
+    #  LAUNCH / STOP (MULTI-INSTANCE SESSIONS)
     # ─────────────────────────────────────────────
     def _launch(self):
+        """Launch a new scrcpy session / virtual display instance."""
         scrcpy_path = mgr.get_scrcpy_path()
         if not scrcpy_path:
             self._log("❌ scrcpy.exe no encontrado.")
             return
-        with self._process_lock:
-            if self.process and self.process.poll() is None:
-                self._log("⚠️ scrcpy ya está en ejecución.")
-                return
+
+        self._session_counter += 1
+        session_id = f"display_{self._session_counter}"
         
-        args = [scrcpy_path] + self._build_args()
-        self._log(f"▶ Ejecutando: {' '.join(args)}")
+        cfg_dict = self._get_config_dict()
         
-        # UI state change
-        self.btn_launch.pack_forget()
-        self.btn_stop.configure(state="normal", text="⏹ Detener")
-        self.btn_stop.pack(side="right", pady=9)
+        # Build distinctive window title
+        pkg = cfg_dict.get("virtual_display_app", "").strip()
+        if pkg:
+            app_name = pkg.split(".")[-1].capitalize()
+            title = f"Scrcpy - {app_name} (Pantalla #{self._session_counter})"
+        elif cfg_dict.get("virtual_display"):
+            title = f"Scrcpy - Pantalla Virtual #{self._session_counter}"
+        else:
+            title = f"Scrcpy Mirror #{self._session_counter}"
+            
+        cfg_dict["window_title"] = title
+        args = [scrcpy_path] + build_scrcpy_args(cfg_dict, is_windows=mgr.IS_WINDOWS)
         
-        # Start the log updater for real-time output
+        self._log(f"▶ [{title}] Ejecutando: {' '.join(args)}")
         self._schedule_log_updater()
         
         def run():
@@ -1651,60 +1781,95 @@ class ScrcpyGUI(ctk.CTk):
                     kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
                 
                 proc = subprocess.Popen(args, **kwargs)
+                session_info = {
+                    "id": session_id,
+                    "title": title,
+                    "app_pkg": pkg,
+                    "proc": proc,
+                    "mode": self.active_mode.get(),
+                    "start_time": time.strftime("%H:%M:%S"),
+                    "is_virtual": cfg_dict.get("virtual_display", False),
+                }
                 with self._process_lock:
-                    self.process = proc
+                    self.active_sessions[session_id] = session_info
+                
+                self.after(0, self._update_sessions_ui)
                 
                 for line in iter(proc.stdout.readline, ''):
                     if line:
-                        self._log(line.rstrip())
+                        self._log(f"[{session_id}] {line.rstrip()}")
                 
                 proc.wait()
-                self._log(f"⏹ scrcpy terminó (código {proc.returncode})")
+                self._log(f"⏹ [{title}] terminó (código {proc.returncode})")
             except Exception as e:
-                self._log(f"❌ Error: {e}")
+                self._log(f"❌ [{title}] Error: {e}")
             finally:
-                self.after(0, self._on_process_end)
+                with self._process_lock:
+                    self.active_sessions.pop(session_id, None)
+                self.after(0, self._update_sessions_ui)
                 
         threading.Thread(target=run, daemon=True).start()
 
-    def _on_process_end(self):
+    def _stop_session(self, session_id):
+        """Terminate a specific running session/virtual display."""
         with self._process_lock:
-            self.process = None
-        self._stop_log_updater()
-        self.btn_stop.pack_forget()
-        self.btn_launch.configure(fg_color=COLORS["green"], text="✅ Terminado")
-        self.btn_launch.pack(side="right", pady=9)
-        self.btn_stop.configure(state="normal", text="⏹ Detener")
-        def reset_btn():
-            with self._process_lock:
-                if self.process is None and hasattr(self, "btn_launch"):
-                    self.btn_launch.configure(fg_color=COLORS["accent"], text="▶ Iniciar Scrcpy")
-        self.after(3000, reset_btn)
-
-    def _stop(self):
-        with self._process_lock:
-            proc = self.process
+            session = self.active_sessions.get(session_id)
+        if not session:
+            return
+        proc = session.get("proc")
+        title = session.get("title", session_id)
+        self._log(f"⏹ Deteniendo [{title}]...")
         if proc and proc.poll() is None:
-            self.btn_stop.configure(state="disabled", text="⌛ Deteniendo...")
-            self._log("⏹ Deteniendo scrcpy...")
-            
             def force_kill():
-                if not proc:
-                    return
                 try:
                     proc.terminate()
-                    for _ in range(20):
+                    for _ in range(15):
                         if proc.poll() is not None:
                             return
                         time.sleep(0.1)
-                    
                     if proc.poll() is None:
-                        self._log("⚠️ No responde, forzando cierre...")
                         proc.kill()
                 except Exception as e:
-                    self._log(f"⚠️ Error al detener: {e}")
-
+                    self._log(f"⚠️ Error al detener {title}: {e}")
             threading.Thread(target=force_kill, daemon=True).start()
+
+    def _stop_all_sessions(self):
+        """Terminate all active scrcpy sessions cleanly."""
+        with self._process_lock:
+            session_ids = list(self.active_sessions.keys())
+        if not session_ids:
+            self._log("ℹ️ No hay sesiones activas para detener.")
+            return
+        self._log(f"⏹ Deteniendo todas las {len(session_ids)} pantallas abiertas...")
+        for sid in session_ids:
+            self._stop_session(sid)
+
+    def _create_new_virtual_display(self):
+        """Open app picker modal and immediately spawn a new virtual display upon selection."""
+        dev = self.v_device.get().split(" (")[0]
+        if not dev or "Buscando" in dev or "Sin dispositivos" in dev:
+            self._log("⚠️ Conecta un dispositivo primero para crear una pantalla virtual.")
+            return
+            
+        def on_selected(pkg, name):
+            self.v_virtual_display.set(True)
+            self.v_virtual_display_app.set(pkg)
+            self.v_flex_display.set(True)
+            if not self.v_virtual_dpi.get():
+                self.v_virtual_dpi.set("220")
+            if not self.v_virtual_display_res.get():
+                self.v_virtual_display_res.set("1920x1080")
+            self._launch()
+            
+        apps = self.app_list_data
+        if not apps:
+            def task():
+                apps = mgr.get_installed_apps(dev)
+                self.app_list_data = apps
+                self.after(0, lambda: AppPickerModal(self, apps, on_selected))
+            threading.Thread(target=task, daemon=True).start()
+        else:
+            AppPickerModal(self, apps, on_selected)
 
     # ─────────────────────────────────────────────
     #  WIRELESS
