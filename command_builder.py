@@ -3,10 +3,13 @@
 This module is independent of the GUI framework so it can be unit-tested
 without importing customtkinter.
 """
+from __future__ import annotations
+
 from datetime import datetime
+from typing import Any
 
 
-def _safe_int(value, default=0):
+def _safe_int(value: Any, default: int = 0) -> int:
     """Safely convert a value to int, returning *default* on failure."""
     try:
         return int(value)
@@ -14,7 +17,7 @@ def _safe_int(value, default=0):
         return default
 
 
-def build_scrcpy_args(cfg, is_windows=True):
+def build_scrcpy_args(cfg: dict[str, Any], is_windows: bool = True) -> list[str]:
     """Build a list of scrcpy CLI arguments from a flat config dictionary.
 
     Parameters
@@ -31,7 +34,7 @@ def build_scrcpy_args(cfg, is_windows=True):
     list[str]
         The argument list (without the scrcpy executable itself).
     """
-    args = []
+    args: list[str] = []
 
     # ── Device ──────────────────────────────────────
     dev = str(cfg.get("device", "")).split(" (")[0]
@@ -53,6 +56,8 @@ def build_scrcpy_args(cfg, is_windows=True):
         args.append("--video-source=camera")
         if cfg.get("camera_torch"):
             args.append("--camera-torch")
+        if cfg.get("camera_high_speed"):
+            args.append("--camera-high-speed")
         zoom = str(cfg.get("camera_zoom", "")).strip()
         if zoom:
             args.append(f"--camera-zoom={zoom}")
@@ -84,6 +89,10 @@ def build_scrcpy_args(cfg, is_windows=True):
     if br and br != 8:
         args.append(f"--video-bit-rate={br}M")
 
+    # scrcpy v4.1: ignore video encoder constraints
+    if cfg.get("ignore_encoder_constraints"):
+        args.append("--ignore-video-encoder-constraints")
+
     # ── Orientation ─────────────────────────────────
     orient = str(cfg.get("orientation", "0"))
     if orient and orient != "0":
@@ -99,7 +108,7 @@ def build_scrcpy_args(cfg, is_windows=True):
         ac = str(cfg.get("audio_codec", "opus"))
         if ac != "opus":
             args.append(f"--audio-codec={ac}")
-        ab = _safe_int(cfg.get("audio_buf", 0))
+        ab = _safe_int(cfg.get("audio_buf") if "audio_buf" in cfg else cfg.get("audio_buffer", 0))
         if ab > 0:
             args.append(f"--audio-buffer={ab}")
         abr = _safe_int(cfg.get("audio_bitrate", 128), 128)
@@ -107,13 +116,18 @@ def build_scrcpy_args(cfg, is_windows=True):
             args.append(f"--audio-bit-rate={abr}K")
         if cfg.get("audio_dup"):
             args.append("--audio-dup")
+        if cfg.get("no_audio_playback"):
+            args.append("--no-audio-playback")
+        aob = _safe_int(cfg.get("audio_output_buf", 0))
+        if aob > 0:
+            args.append(f"--audio-output-buffer={aob}")
 
     # ── Video buffer ────────────────────────────────
     vb = _safe_int(cfg.get("video_buffer", 0))
     if vb > 0:
         args.append(f"--video-buffer={vb}")
 
-    # ── Window ──────────────────────────────────────
+    # ── Window & Playback ───────────────────────────
     if cfg.get("fullscreen"):
         args.append("--fullscreen")
     if cfg.get("always_on_top"):
@@ -122,6 +136,8 @@ def build_scrcpy_args(cfg, is_windows=True):
         args.append("--window-borderless")
     if cfg.get("disable_screensaver"):
         args.append("--disable-screensaver")
+    if cfg.get("no_playback"):
+        args.append("--no-playback")
     if not cfg.get("otg_mode"):
         if cfg.get("stay_awake"):
             args.append("--stay-awake")
@@ -134,6 +150,9 @@ def build_scrcpy_args(cfg, is_windows=True):
         args.append(f"--background-color={bg}")
     if cfg.get("no_aspect_ratio_lock"):
         args.append("--no-window-aspect-ratio-lock")
+    wt = str(cfg.get("window_title", "")).strip()
+    if wt:
+        args.append(f"--window-title={wt}")
 
     # ── Virtual Display ─────────────────────────────
     if cfg.get("virtual_display") and src != "camera":
@@ -172,6 +191,14 @@ def build_scrcpy_args(cfg, is_windows=True):
 
     if cfg.get("no_clipboard_sync"):
         args.append("--no-clipboard-autosync")
+    if cfg.get("legacy_paste"):
+        args.append("--legacy-paste")
+
+    # ── Connection & Process ────────────────────────
+    if cfg.get("force_adb_forward"):
+        args.append("--force-adb-forward")
+    if cfg.get("kill_adb_on_close"):
+        args.append("--kill-adb-on-close")
 
     # ── Recording ───────────────────────────────────
     if cfg.get("record"):

@@ -11,6 +11,10 @@ dist/
 # Scrcpy Data (Downloaded Binaries)
 scrcpy/
 version.json
+config.json
+*.bak
+clean_help.txt
+scrcpy_help.txt
 
 # IDEs
 .vscode/

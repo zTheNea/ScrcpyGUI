@@ -1,5 +1,21 @@
 """Manages scrcpy download, detection and updates from GitHub."""
-import os, json, shutil, zipfile, urllib.request, threading, platform, ssl, subprocess, re, time
+from __future__ import annotations
+
+import json
+import logging
+import os
+import platform
+import re
+import shutil
+import ssl
+import subprocess
+import threading
+import time
+import urllib.request
+import zipfile
+from typing import Any, Callable, Optional
+
+logger = logging.getLogger(__name__)
 
 GITHUB_API = "https://api.github.com/repos/Genymobile/scrcpy/releases/latest"
 
@@ -14,14 +30,14 @@ else:
 SCRCPY_DIR = os.path.join(APP_DIR, "scrcpy")
 VERSION_FILE = os.path.join(APP_DIR, "version.json")
 
-def _subprocess_kwargs():
+def _subprocess_kwargs() -> dict[str, Any]:
     """Return common subprocess kwargs (hides console window on Windows)."""
-    kw = {}
+    kw: dict[str, Any] = {}
     if IS_WINDOWS:
         kw["creationflags"] = subprocess.CREATE_NO_WINDOW
     return kw
 
-def get_scrcpy_path():
+def get_scrcpy_path() -> Optional[str]:
     """Find scrcpy: app dir > PATH > None."""
     # Check local folder first (mainly Windows)
     local_name = "scrcpy.exe" if IS_WINDOWS else "scrcpy"
@@ -50,15 +66,21 @@ def _save_version(ver, url):
         json.dump({"version": ver, "url": url}, f)
 
 def get_ssl_context():
-    """Create an SSL context. Uses verified certificates by default, with unverified fallback."""
+    """Create a verified SSL context.
+
+    Returns ``None`` on failure — urllib will then use Python's own default
+    context which still validates certificates.  We intentionally do NOT
+    fall back to ``ssl._create_unverified_context`` to avoid silent MITM
+    exposure when downloading binaries.
+    """
     try:
-        ctx = ssl.create_default_context()
-        return ctx
-    except Exception:
-        try:
-            return ssl._create_unverified_context()
-        except AttributeError:
-            return None
+        return ssl.create_default_context()
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(
+            "Could not create verified SSL context: %s", e,
+        )
+        return None
 
 def check_latest(callback):
     """Check GitHub for latest release. Calls callback(tag, download_url, error)."""
@@ -352,5 +374,254 @@ def get_installed_apps(device_id):
         unique_apps = list(set(packages))
         return sorted(unique_apps, key=lambda x: x[0])
     except Exception as e:
-        print(f"Error en escaneo universal: {e}")
+        logger.error("Error en escaneo universal: %s", e)
         return []
+
+
+def run_scrcpy_query(flag: str, device: Optional[str] = None) -> tuple[bool, str]:
+    """Execute a query flag (e.g. --list-encoders, --list-cameras, --list-displays) and return output."""
+    path = get_scrcpy_path()
+    if not path:
+        return False, "❌ scrcpy no encontrado."
+    
+    cmd = [path, flag]
+    if device and "Buscando" not in device and "Sin dispositivos" not in device:
+        serial = device.split(" (")[0].strip()
+        if serial:
+            cmd.extend(["-s", serial])
+            
+    try:
+        kw = _subprocess_kwargs()
+        r = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=12,
+            cwd=os.path.dirname(path),
+            **kw
+        )
+        out = r.stdout.strip() or r.stderr.strip()
+        return True, out or "Comando ejecutado sin salida."
+    except Exception as e:
+        return False, f"❌ Error al consultar {flag}: {e}"
+
+
+def parse_encoders(raw_output: str) -> dict:
+    """Parse output from scrcpy --list-encoders into structured video and audio codecs."""
+    video_codecs = []
+    audio_codecs = []
+    video_encoders = []
+    audio_encoders = []
+    
+    # Known scrcpy codecs
+    known_v_codecs = ["h264", "h265", "av1", "vp9", "vp8"]
+    known_a_codecs = ["opus", "aac", "flac", "raw"]
+    
+    for line in raw_output.splitlines():
+        line_clean = line.strip()
+        # Look for --video-codec=<codec>
+        m_vc = re.search(r'--video-codec=([a-zA-Z0-9_]+)', line_clean)
+        if m_vc:
+            c = m_vc.group(1).lower()
+            if c in known_v_codecs and c not in video_codecs:
+                video_codecs.append(c)
+                
+        # Look for --audio-codec=<codec>
+        m_ac = re.search(r'--audio-codec=([a-zA-Z0-9_]+)', line_clean)
+        if m_ac:
+            c = m_ac.group(1).lower()
+            if c in known_a_codecs and c not in audio_codecs:
+                audio_codecs.append(c)
+                
+        # Look for encoder names
+        m_ve = re.search(r"--video-encoder=['\"]?([^'\"]+)['\"]?", line_clean)
+        if m_ve:
+            enc = m_ve.group(1)
+            if enc not in video_encoders:
+                video_encoders.append(enc)
+                
+        m_ae = re.search(r"--audio-encoder=['\"]?([^'\"]+)['\"]?", line_clean)
+        if m_ae:
+            enc = m_ae.group(1)
+            if enc not in audio_encoders:
+                audio_encoders.append(enc)
+
+    # Fallbacks if parsing didn't find any specific codecs
+    if not video_codecs:
+        video_codecs = ["h264", "h265", "av1", "vp9", "vp8"]
+    if not audio_codecs:
+        audio_codecs = ["opus", "aac", "flac", "raw"]
+
+    return {
+        "video_codecs": video_codecs,
+        "audio_codecs": audio_codecs,
+        "video_encoders": video_encoders,
+        "audio_encoders": audio_encoders,
+    }
+
+
+def parse_cameras(raw_output: str) -> list[tuple[str, str, str]]:
+    """Parse output from scrcpy --list-cameras.
+    
+    Returns list of (camera_id, facing, display_label).
+    """
+    cameras = []
+    # Lines like: --camera-id=0    (facing: back) or --camera-id=1 (facing: front)
+    pattern = re.compile(r'--camera-id=([0-9]+)(?:.*?facing[:\s]+([a-zA-Z]+))?', re.IGNORECASE)
+    
+    for line in raw_output.splitlines():
+        line_clean = line.strip()
+        m = pattern.search(line_clean)
+        if m:
+            cid = m.group(1)
+            facing = (m.group(2) or "").lower()
+            if facing == "back":
+                label = f"ID {cid} (Trasera principal)"
+            elif facing == "front":
+                label = f"ID {cid} (Frontal)"
+            elif facing == "external":
+                label = f"ID {cid} (Externa)"
+            else:
+                label = f"ID {cid}"
+            
+            if not any(c[0] == cid for c in cameras):
+                cameras.append((cid, facing, label))
+                
+    if not cameras:
+        cameras = [("0", "back", "ID 0 (Trasera)"), ("1", "front", "ID 1 (Frontal)")]
+        
+    return cameras
+
+
+def parse_displays(raw_output: str) -> list[tuple[str, str]]:
+    """Parse output from scrcpy --list-displays.
+    
+    Returns list of (display_id, display_label).
+    """
+    displays = []
+    pattern = re.compile(r'--display-id=([0-9]+)(?:.*?([0-9]+x[0-9]+))?', re.IGNORECASE)
+    
+    for line in raw_output.splitlines():
+        line_clean = line.strip()
+        m = pattern.search(line_clean)
+        if m:
+            did = m.group(1)
+            res = m.group(2) or ""
+            label = f"ID {did} ({res})" if res else f"ID {did}"
+            if did == "0":
+                label += " - Pantalla Principal"
+            if not any(d[0] == did for d in displays):
+                displays.append((did, label))
+                
+    if not displays:
+        displays = [("0", "ID 0 - Pantalla Principal")]
+        
+    return displays
+
+
+def get_device_full_info(device_serial: str) -> dict:
+    """Retrieve full hardware and OS properties for a device via ADB getprop."""
+    adb = _get_adb_path()
+    if not adb:
+        return {"brand": "Android", "model": "Dispositivo", "android_version": "14", "sdk": 34}
+        
+    try:
+        kw = _subprocess_kwargs()
+        r = subprocess.run(
+            [adb, "-s", device_serial, "shell", "getprop"],
+            capture_output=True, text=True, timeout=5, **kw
+        )
+        out = r.stdout
+        
+        def _get_val(prop_name: str) -> str:
+            m = re.search(rf'\[{re.escape(prop_name)}\]:\s*\[(.*?)\]', out)
+            return m.group(1).strip() if m else ""
+            
+        model = _get_val("ro.product.model") or _get_val("ro.product.marketname") or "Android"
+        brand = _get_val("ro.product.brand") or _get_val("ro.product.manufacturer") or ""
+        android_ver = _get_val("ro.build.version.release") or "14"
+        sdk_str = _get_val("ro.build.version.sdk")
+        soc = _get_val("ro.soc.model") or _get_val("ro.board.platform") or ""
+        
+        try:
+            sdk_int = int(sdk_str)
+        except Exception:
+            sdk_int = 34
+            
+        return {
+            "model": model,
+            "brand": brand.capitalize(),
+            "android_version": android_ver,
+            "sdk": sdk_int,
+            "soc": soc,
+        }
+    except Exception:
+        return {"brand": "Android", "model": "Dispositivo", "android_version": "14", "sdk": 34, "soc": ""}
+
+
+def scan_device_capabilities(device_serial: str) -> dict:
+    """Execute full hardware scan of encoders, cameras, displays, and OS support for a device."""
+    clean_serial = device_serial.split(" (")[0].strip()
+    
+    # 1. Device Info via ADB
+    hw_info = get_device_full_info(clean_serial)
+    
+    # 2. Encoders via scrcpy query
+    _, enc_raw = run_scrcpy_query("--list-encoders", clean_serial)
+    encoders_info = parse_encoders(enc_raw)
+    
+    # 3. Cameras via scrcpy query
+    _, cam_raw = run_scrcpy_query("--list-cameras", clean_serial)
+    cameras_list = parse_cameras(cam_raw)
+    
+    # 4. Displays via scrcpy query
+    _, dsp_raw = run_scrcpy_query("--list-displays", clean_serial)
+    displays_list = parse_displays(dsp_raw)
+    
+    sdk = hw_info.get("sdk", 34)
+    
+    return {
+        "serial": clean_serial,
+        "model": hw_info.get("model", "Dispositivo"),
+        "brand": hw_info.get("brand", "Android"),
+        "android_version": hw_info.get("android_version", "14"),
+        "sdk": sdk,
+        "soc": hw_info.get("soc", ""),
+        "video_codecs": encoders_info["video_codecs"],
+        "audio_codecs": encoders_info["audio_codecs"],
+        "video_encoders": encoders_info["video_encoders"],
+        "audio_encoders": encoders_info["audio_encoders"],
+        "cameras": cameras_list,
+        "displays": displays_list,
+        "supports_audio": sdk >= 30, # Android 11+
+        "supports_virtual_display": sdk >= 29, # Android 10+
+        "supports_flex_display": sdk >= 34, # Android 14+
+        "supports_uhid": sdk >= 24, # Android 7.0+
+    }
+
+
+def enable_desktop_freeform(device: Optional[str] = None) -> tuple[bool, str]:
+    """Enable Android freeform windows and force desktop mode on external displays via ADB."""
+    path = get_scrcpy_path()
+    adb = "adb"
+    if path:
+        local_adb = os.path.join(os.path.dirname(path), "adb.exe" if IS_WINDOWS else "adb")
+        if os.path.isfile(local_adb):
+            adb = local_adb
+        else:
+            adb = shutil.which("adb") or "adb"
+            
+    serial = device.split(" (")[0].strip() if device and "Buscando" not in device and "Sin dispositivos" not in device else None
+    base_cmd = [adb]
+    if serial:
+        base_cmd.extend(["-s", serial])
+        
+    try:
+        kw = _subprocess_kwargs()
+        subprocess.run(base_cmd + ["shell", "settings", "put", "global", "enable_freeform_support", "1"], timeout=6, **kw)
+        subprocess.run(base_cmd + ["shell", "settings", "put", "global", "force_desktop_mode_on_external_displays", "1"], timeout=6, **kw)
+        return True, "✅ Modo Escritorio y Ventanas Libres activados vía ADB en tu dispositivo."
+    except Exception as e:
+        return False, f"❌ Error al activar Modo Escritorio en Android: {e}"
+
+
