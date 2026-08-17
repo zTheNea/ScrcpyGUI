@@ -102,7 +102,8 @@ class AppPickerModal(ctk.CTkToplevel):
             ctk.CTkLabel(self.list_frame, text="No se encontraron aplicaciones coincidentes.", font=ctk.CTkFont(size=11), text_color=COLORS["muted"]).pack(pady=20)
             return
 
-        for name, pkg in self.filtered_apps:
+        display_list = self.filtered_apps[:50]
+        for name, pkg in display_list:
             card = ctk.CTkFrame(self.list_frame, fg_color=COLORS["card"], corner_radius=6, border_width=1, border_color=COLORS["border"], height=42, cursor="hand2")
             card.pack(fill="x", pady=2)
             card.pack_propagate(False)
@@ -128,7 +129,19 @@ class AppPickerModal(ctk.CTkToplevel):
             card.bind("<Enter>", on_enter)
             card.bind("<Leave>", on_leave)
 
+        if len(self.filtered_apps) > 50:
+            rem = len(self.filtered_apps) - 50
+            ctk.CTkLabel(
+                self.list_frame,
+                text=f"➕ Mostrando 50 de {len(self.filtered_apps)} apps ({rem} más ocultas. Escribe en el buscador para filtrar)",
+                font=ctk.CTkFont(size=10), text_color=COLORS["muted"]
+            ).pack(pady=8)
+
     def _select(self, pkg, name):
+        try:
+            self.grab_release()
+        except Exception:
+            pass
         self.on_select(pkg, name)
         self.destroy()
 
@@ -1662,8 +1675,11 @@ class ScrcpyGUI(ctk.CTk):
         self.btn_launch.configure(fg_color=COLORS["green"], text="✅ Terminado")
         self.btn_launch.pack(side="right", pady=9)
         self.btn_stop.configure(state="normal", text="⏹ Detener")
-        self.after(3000, lambda: self.btn_launch.configure(
-            fg_color=COLORS["accent"], text="▶ Iniciar Scrcpy"))
+        def reset_btn():
+            with self._process_lock:
+                if self.process is None and hasattr(self, "btn_launch"):
+                    self.btn_launch.configure(fg_color=COLORS["accent"], text="▶ Iniciar Scrcpy")
+        self.after(3000, reset_btn)
 
     def _stop(self):
         with self._process_lock:
