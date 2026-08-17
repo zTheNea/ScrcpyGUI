@@ -13,8 +13,8 @@ scrcpy/
 version.json
 config.json
 *.bak
-clean_help.txt
 scrcpy_help.txt
+clean_help.txt
 
 # IDEs
 .vscode/

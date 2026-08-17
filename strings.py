@@ -3,7 +3,7 @@ from __future__ import annotations
 
 STRINGS: dict[str, str] = {
     # App
-    "app_title": "ScrcpyGUI v1.2.1",
+    "app_title": "ScrcpyGUI v1.3.0",
     "system_windows": "Sistema: Windows",
     "system_other": "Sistema: Linux/macOS",
     

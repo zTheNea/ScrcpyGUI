@@ -1,58 +1,76 @@
-# 📋 Informe de Mejoras y Cambios — ScrcpyGUI v1.3.0
-**Fecha:** 17 de Agosto, 2026  
-**Versión:** 1.3.0 *"IDE Layout, Smart Hardware Detection & Virtual App Display"*
+# 🚀 Registro de Cambios - ScrcpyGUI v1.3.0
+
+**Fecha:** Agosto 2026  
+**Versión:** `v1.3.0` "IDE Edition & Smart Hardware Intelligence"
 
 ---
 
 ## 📝 Resumen Ejecutivo
 
-La versión **1.3.0** representa una de las mayores evoluciones de **ScrcpyGUI**, transformando la aplicación en un entorno de trabajo profesional con estética inspirada en editores de código modernos (VS Code / JetBrains / Cursor). Introduce detección y adaptación inteligente de hardware por dispositivo, soporte para pantallas virtuales multi-ventana con auto-lanzador de apps y Pantalla Flex, un buscador modal de aplicaciones con filtrado en tiempo real, y una suite completa de pruebas unitarias automatizadas.
+La versión **1.3.0** representa el mayor rediseño visual y técnico de ScrcpyGUI hasta la fecha. Se ha transformado la experiencia de usuario adoptando un diseño modular moderno inspirado en los editores de código contemporáneos (VS Code / JetBrains / Cursor), integrando un sistema de escaneo automático de capacidades de hardware por dispositivo y añadiendo herramientas de multitarea como pantallas virtuales interactivas con selector inteligente de aplicaciones y soporte dinámico de Pantalla Flex (scrcpy v4.0+).
 
 ---
 
-## 🌟 Principales Novedades y Características
+## 🌟 Novedades Principales
 
-### 1. 🎨 Rediseño Integral de Interfaz (Estilo IDE Profesional)
-- **Barra de Navegación Superior Compacta**: Integra el logotipo, selector de dispositivos con auto-detección, accesos directos a herramientas de inspección (`🎬 Encoders`, `📷 Cámaras`, `🖥️ Pantallas`, `⚡ Modo PC`), botón de actualización rápida y botón principal de ejecución (`▶ Iniciar Scrcpy` / `⏹ Detener`).
-- **Barra Lateral de Actividades (Explorer)**: Lista vertical estilizada de todos los perfiles de conexión (`🖥️ Modo Escritorio`, `🚀 App en Pantalla Virtual`, `🎮 Gaming Pro`, `🎬 Cine 2K`, `⚖️ Balanceado`, `📺 Streamer`, etc.) + `⚙️ Personalizado` + Tarjeta de versión instalada con buscador de actualizaciones.
-- **Espacio de Trabajo Central Dinámico**:
-  - **Ficha Técnica de Presets**: Muestra 4 tarjetas de métricas en tiempo real (*Códec, Resolución, FPS, Bitrate*), lista de características activas y panel de *Interruptores Rápidos de Sesión* (*Mantener despierto, Apagar pantalla móvil, Pantalla completa, Siempre visible, Pantalla Flex*).
-  - **Editor de Propiedades Avanzadas**: Pestañas con distribución simétrica en 2 columnas sin saltos de posición (`anchor="nw"`).
-- **Dock de Terminal Integrada**: Consola inferior estilo terminal de desarrollo con texto verde Consolas, botón para copiar el comando CLI exacto generado (`📋 Copiar CLI`) y limpiador de registro (`🗑️ Limpiar`).
-- **Barra de Estado Inferior**: Muestra la versión de scrcpy activa, estado del dispositivo conectado, codificación y versión de ScrcpyGUI.
-
----
-
-### 2. 📱 Detección y Adaptación Inteligente de Hardware
-- **Escaneo Automático Asíncrono**: Al conectar o seleccionar un dispositivo, ScrcpyGUI analiza en segundo plano sus encoders de hardware, cámaras, pantallas y versión de Android / capa de personalización (HyperOS, Samsung OneUI, Pixel, etc.).
-- **Filtrado Dinámico de Opciones**:
-  - El selector de **Códec de Video** se actualiza automáticamente para mostrar **únicamente** los códecs soportados por el chip del móvil (`H264`, `H265`, `AV1`, `VP9`, `VP8`).
-  - El selector de **Códec de Audio** filtra formatos compatibles (`Opus`, `AAC`, `FLAC`, `RAW`).
-- **Auto-adaptación de Presets**: Si se selecciona un perfil con un códec no soportado por el hardware conectado, la app lo auto-adapta al mejor códec disponible sin interrumpir el flujo ni generar errores.
-- **Caché por Serial**: Almacenamiento en memoria de las capacidades para cambios instantáneos entre dispositivos sin re-escanear.
-- **Reporte Técnico Inmediato**: Imprime en la consola el desglose de hardware y muestra el modelo y versión de Android en la barra de estado.
+### 💻 1. Nuevo Diseño Modular Estilo IDE
+- **Barra de Navegación Superior Unificada (`Topbar`)**:
+  - Logo compacto con acceso directo al selector de dispositivos en tiempo real.
+  - Botones de diagnóstico de hardware en 1 clic (`🎬 Encoders`, `📷 Cámaras`, `🖥️ Pantallas`, `⚡ Modo PC`).
+  - Botón de actualización de scrcpy y botón de ejecución estilizado (`▶ Iniciar Scrcpy` / `⏹ Detener`).
+- **Barra Lateral de Actividades (`Sidebar`)**:
+  - Explorador vertical de modos y presets con badges descriptivos y realce de color por categoría.
+  - Tarjeta de versión integrada en el pie con verificación y descarga en segundo plano.
+- **Espacio de Trabajo Central Adaptativo (`Center Workspace`)**:
+  - **Ficha Técnica / Inspector de Preset**: Muestra métricas clave en 4 tarjetas de estadísticas (*Códec, Resolución, FPS, Bitrate*), resumen de características y panel de switches rápidos de sesión.
+  - **Editor de Propiedades Avanzado**: Pestañas de configuración personalizada sin saltos ni desalineaciones (`anchor="nw"`).
+- **Dock de Terminal Integrado (`Terminal Console Dock`)**:
+  - Consola estilo terminal con tipografía monoespaciada verde *Consolas* para logs y comandos generados en tiempo real.
+  - Botones rápidos de utilidad: `[ 📋 Copiar CLI ]` y `[ 🗑️ Limpiar ]`.
 
 ---
 
-### 3. 🚀 Preset 'App en Pantalla Virtual' & Pantalla Flex (scrcpy v4.0+)
-- **Nuevo Modo Preconfigurado**: Abre aplicaciones del móvil en una pantalla virtual secundaria independiente tipo monitor secundario.
-- **Prompt Automático de Selección**: Al activar el modo, se abre de forma automática el selector de aplicaciones para elegir qué app ejecutar.
-- **Tarjeta Interactiva en el Inspector**: Permite visualizar la aplicación vinculada y cambiarla o desvincularla con un solo clic.
-- **Soporte de Pantalla Flex (`--flex-display`)**: Permite que la ventana en Windows adapte su resolución y contenido fluidamente conforme se redimensiona en la PC.
+### 🧠 2. Escaneo Inteligente y Adaptación de Capacidades por Dispositivo
+- **Análisis de Hardware Automático en Segundo Plano**:
+  - Al conectar o seleccionar un dispositivo, ScrcpyGUI analiza de forma asíncrona sus capacidades reales mediante ADB y scrcpy:
+    - **Códecs de Video Hardware**: Consulta los encoders disponibles (`--list-encoders`) y filtra el menú de códecs para mostrar **únicamente** los soportados por el chip del teléfono (H.264, H.265, AV1, VP8, VP9).
+    - **Códecs de Audio**: Identifica compatibilidad con Opus, AAC, FLAC o RAW.
+    - **Cámaras Físicas**: Lista IDs reales y orientaciones (Trasera, Frontal, Gran Angular).
+    - **Pantallas**: Detecta resoluciones y pantallas adicionales activas.
+    - **Versión de Android & SoC**: Identifica la versión de Android y nivel de API para validar compatibilidad con UHID, Audio forwarding y Modo Escritorio.
+  - Sistema de caché por número de serie para respuestas instantáneas.
 
 ---
 
-### 4. 🔍 Modal de Búsqueda Rápida de Aplicaciones (`AppPickerModal`)
-- Reemplazo de los menús desplegables estáticos por un diálogo modal interactivo.
-- **Filtrado en tiempo real** por nombre comercial o identificador de paquete (`package name`).
-- Tarjetas oscuras con resaltado al pasar el ratón (*hover*), selección en 1 clic y botón de cierre rápido.
+### 📱 3. Preset "App en Pantalla Virtual" & Selector Modal de Apps
+- **Nuevo Preset Dedicado**: `🚀 App en Pantalla Virtual` para abrir apps aisladas en un monitor virtual secundario en resolución 1080p con DPI de tablet y control UHID.
+- **Modal de Búsqueda Instantánea (`AppPickerModal`)**:
+  - Sustituye los menús desplegables estáticos por un diálogo flotante interactivo con filtrado en tiempo real por nombre de app o paquete.
+  - Tarjeta interactiva en el panel central con botón directo `[ 🔍 Seleccionar / Cambiar App... ]` y `[ ❌ ]`.
 
 ---
 
-## 🧪 Pruebas y Calidad de Código
-- **27 Pruebas Unitarias Automatizadas (100% PASS)** en `unittest`.
-- Módulos probados:
-  - Construcción determinista de comandos CLI (`command_builder.py`).
-  - Persistencia, guardado y copias de seguridad de perfiles (`config_manager.py`).
-  - Parseo de encoders, cámaras, pantallas y extracción de IPs (`scrcpy_manager.py`).
-- Compatibilidad validada con scrcpy v4.1 en Windows 10 / 11.
+### 🔄 4. Integración de Pantalla Flex (scrcpy v4.0+)
+- **Soporte `--flex-display`**:
+  - Permite que la ventana de la pantalla virtual secundaria adapte automáticamente su resolución y relación de aspecto conforme el usuario redimensiona la ventana en Windows con el ratón.
+  - Activada por defecto en el modo de aplicaciones virtuales y accesible desde los interruptores rápidos de sesión.
+
+---
+
+### 📦 5. Actualizador y Gestor de scrcpy Integrado
+- **Detección y Descarga Directa**:
+  - Consulta automática de las últimas versiones oficiales de scrcpy en GitHub Releases.
+  - Descarga, extracción e instalación automática del binario oficial de 64 bits sin necesidad de configuración manual.
+
+---
+
+## 🐛 Correcciones y Optimizaciones Técnicas
+
+- **Estabilidad de Pestañas**: Fijado el alineamiento de pestañas en `CTkTabview` con `anchor="nw"` y layouts balanceados en 2 columnas uniformes para evitar desplazamientos horizontales no deseados.
+- **Debouncing de Interfaz**: Actualización de comandos optimizada con temporizador debounce para evitar llamadas redundantes de reconstrucción de CLI.
+- **Manejo de Errores de Descarga**: Corregido el manejador de callbacks de descarga para evitar excepciones `AttributeError` en hilos secundarios.
+- **Suite de Pruebas Automatizadas**: 27 pruebas unitarias completas pasando al 100% (`tests/test_command_builder.py`, `tests/test_config_manager.py`, `tests/test_scrcpy_manager.py`).
+
+---
+
+*Desarrollado por [zTheNea](https://github.com/zTheNea) — ScrcpyGUI v1.3.0*
