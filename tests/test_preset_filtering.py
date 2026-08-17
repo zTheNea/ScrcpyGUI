@@ -47,6 +47,17 @@ class TestPresetFiltering(unittest.TestCase):
         self.assertIn("desktop", visible)
         self.assertIn("video", visible)
 
+    def test_vp8_hidden_when_not_supported(self):
+        # Device supports only H.264 and H.265 (no VP8 encoder)
+        caps = {
+            "video_codecs": ["h264", "h265"],
+            "audio_codecs": ["opus", "aac"],
+            "supports_virtual_display": True,
+        }
+        visible, hidden = filter_presets_logic(caps)
+        self.assertNotIn("vp8", visible)
+        self.assertIn("vp8", hidden)
+
     def test_virtual_display_hidden_on_android9_and_below(self):
         # Android 9 (no virtual display support)
         caps = {
