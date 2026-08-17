@@ -711,6 +711,7 @@ class ScrcpyGUI(ctk.CTk):
                 self.device_menu.configure(values=["Sin dispositivos"])
                 self.v_device.set("Sin dispositivos")
                 self.sb_dev.configure(text="📱 Sin dispositivos", text_color=COLORS["danger"])
+                self._filter_presets(None)
             else:
                 vals = [f"{d[0]} ({d[1]})" for d in devs]
                 self.device_menu.configure(values=vals)
@@ -724,6 +725,7 @@ class ScrcpyGUI(ctk.CTk):
         """Called whenever the selected device changes to analyze its hardware capabilities."""
         if not dev_str or "Sin dispositivos" in dev_str or "Buscando" in dev_str:
             self._current_device_caps = None
+            self._filter_presets(None)
             return
             
         serial = dev_str.split(" (")[0].strip()
@@ -743,6 +745,73 @@ class ScrcpyGUI(ctk.CTk):
             self.after(0, lambda: self._apply_device_capabilities(caps))
             
         threading.Thread(target=task, daemon=True).start()
+
+    def _filter_presets(self, caps=None):
+        """Show only presets that are fully compatible with the connected device hardware."""
+        if not hasattr(self, "mode_buttons"):
+            return
+
+        if not caps:
+            # Re-pack all presets in definition order when no device is selected
+            for key in PRESETS.keys():
+                item = self.mode_buttons.get(key)
+                if item:
+                    item.pack(fill="x", pady=2, padx=4)
+            return
+
+        v_codecs = set(caps.get("video_codecs", VIDEO_CODECS))
+        a_codecs = set(caps.get("audio_codecs", AUDIO_CODECS))
+        supports_vd = caps.get("supports_virtual_display", True)
+
+        visible_keys = []
+        hidden_keys = []
+
+        # Unpack all preset buttons first to maintain strict visual ordering
+        for key in PRESETS.keys():
+            item = self.mode_buttons.get(key)
+            if item:
+                item.pack_forget()
+
+        # Pack only compatible items in defined sequence
+        for key, p in PRESETS.items():
+            item = self.mode_buttons.get(key)
+            if not item:
+                continue
+
+            req_v_codec = p.get("codec", "h264")
+            req_a_codec = p.get("audio_codec", "opus")
+            requires_vd = p.get("virtual_display", False)
+
+            is_compat = True
+            reason = ""
+
+            if req_v_codec and req_v_codec not in v_codecs:
+                is_compat = False
+                reason = f"Códec de video {req_v_codec.upper()} no soportado por este móvil"
+            elif requires_vd and not supports_vd:
+                is_compat = False
+                reason = "Requiere Android 10+ para pantallas virtuales"
+            elif p.get("audio") and req_a_codec and req_a_codec not in a_codecs:
+                is_compat = False
+                reason = f"Códec de audio {req_a_codec.upper()} no soportado"
+
+            if is_compat:
+                item.pack(fill="x", pady=2, padx=4)
+                visible_keys.append(key)
+            else:
+                hidden_keys.append((p.get("label", key), reason))
+
+        if hidden_keys:
+            self._log(f"🛡️ Ocultados {len(hidden_keys)} presets incompatibles con el hardware de tu dispositivo:")
+            for lbl, r in hidden_keys:
+                self._log(f"   ✖ {lbl} ({r})")
+
+        # If current active mode is incompatible / hidden, switch to the first compatible preset
+        curr = self.active_mode.get()
+        if curr in PRESETS and curr not in visible_keys:
+            fallback = "desktop" if "desktop" in visible_keys else (visible_keys[0] if visible_keys else "custom")
+            self._log(f"ℹ️ Modo '{curr}' oculto por incompatibilidad. Cambiado automáticamente a '{fallback}'.")
+            self._select_mode(fallback)
 
     def _apply_device_capabilities(self, caps):
         """Adapt the UI options and presets based on the device's real hardware support."""
@@ -768,7 +837,10 @@ class ScrcpyGUI(ctk.CTk):
         if self.v_audio_codec.get() not in a_codecs:
             self.v_audio_codec.set(a_codecs[0] if a_codecs else "opus")
             
-        # 4. Log Summary in terminal
+        # 4. Filter and hide incompatible sidebar presets
+        self._filter_presets(caps)
+            
+        # 5. Log Summary in terminal
         v_str = ", ".join(c.upper() for c in v_codecs)
         a_str = ", ".join(c.upper() for c in a_codecs)
         num_cams = len(caps.get("cameras", []))
@@ -778,7 +850,7 @@ class ScrcpyGUI(ctk.CTk):
         self._log(f"   🔊 Códecs Audio compatibles: [{a_str}]")
         self._log(f"   📷 Cámaras: {num_cams} | 🖥️ Pantallas: {num_dsps}")
         
-        # 5. Adapt active preset if current preset requires an unsupported codec
+        # 6. Adapt active preset if current preset requires an unsupported codec
         curr_mode = self.active_mode.get()
         if curr_mode in PRESETS:
             p_codec = PRESETS[curr_mode].get("codec", "h264")
@@ -786,7 +858,7 @@ class ScrcpyGUI(ctk.CTk):
                 self.v_codec.set("h264")
                 self._log(f"ℹ️ Códec {p_codec.upper()} no soportado por este móvil, adaptado automáticamente a H264.")
                 
-        # 6. Update command
+        # 7. Update command
         self._update_command()
 
     def _check_update(self):
