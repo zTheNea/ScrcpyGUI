@@ -36,9 +36,26 @@ class TestBuildScrcpyArgs(unittest.TestCase):
         self.assertNotIn("-s", build_scrcpy_args({"device": "Sin dispositivos"}))
 
     def test_otg_mode_shortcircuits(self):
-        args = build_scrcpy_args({"device": "RFC123", "otg_mode": True, "fps": 120, "bitrate": 16})
+        args = build_scrcpy_args({"device": "RFC123", "otg_mode": True, "audio": False, "fps": 120, "bitrate": 16})
         self.assertIn("--otg", args)
         self.assertNotIn("--max-fps=120", args)
+
+    def test_otg_mode_with_audio(self):
+        cfg = {
+            "device": "RFC123",
+            "otg_mode": True,
+            "audio": True,
+            "audio_codec": "opus",
+            "audio_bitrate": 128,
+            "stay_awake": True,
+        }
+        args = build_scrcpy_args(cfg)
+        self.assertNotIn("--otg", args)
+        self.assertIn("--no-video", args)
+        self.assertIn("--keyboard=uhid", args)
+        self.assertIn("--mouse=uhid", args)
+        self.assertIn("--stay-awake", args)
+        self.assertNotIn("--no-audio", args)
 
     def test_no_video_flag(self):
         args = build_scrcpy_args({"no_video": True})

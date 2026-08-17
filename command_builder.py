@@ -41,13 +41,15 @@ def build_scrcpy_args(cfg: dict[str, Any], is_windows: bool = True) -> list[str]
     if dev and "Buscando" not in dev and "Sin dispositivos" not in dev:
         args.extend(["-s", dev])
 
-    # ── OTG shortcut ────────────────────────────────
+    # ── OTG mode ────────────────────────────────
     if cfg.get("otg_mode"):
-        args.append("--otg")
-        return args
-
-    # ── No-video ────────────────────────────────────
-    if cfg.get("no_video"):
+        if cfg.get("audio", False):
+            # OTG with Audio forwarding: headless video, audio streaming & native UHID controls
+            args.append("--no-video")
+        else:
+            args.append("--otg")
+            return args
+    elif cfg.get("no_video"):
         args.append("--no-video")
 
     # ── Video Source ────────────────────────────────
@@ -138,7 +140,7 @@ def build_scrcpy_args(cfg: dict[str, Any], is_windows: bool = True) -> list[str]
         args.append("--disable-screensaver")
     if cfg.get("no_playback"):
         args.append("--no-playback")
-    if not cfg.get("otg_mode"):
+    if not (cfg.get("otg_mode") and not cfg.get("audio", False)):
         if cfg.get("stay_awake"):
             args.append("--stay-awake")
         if cfg.get("screen_off"):
@@ -180,9 +182,13 @@ def build_scrcpy_args(cfg: dict[str, Any], is_windows: bool = True) -> list[str]
         args.append("--no-control")
     else:
         kb = str(cfg.get("keyboard", ""))
+        if not kb and cfg.get("otg_mode"):
+            kb = "uhid"
         if kb and kb != "sdk":
             args.append(f"--keyboard={kb}")
         ms2 = str(cfg.get("mouse", ""))
+        if not ms2 and cfg.get("otg_mode"):
+            ms2 = "uhid"
         if ms2 and ms2 != "sdk":
             args.append(f"--mouse={ms2}")
         gp = str(cfg.get("gamepad", ""))

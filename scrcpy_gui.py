@@ -555,6 +555,7 @@ class ScrcpyGUI(ctk.CTk):
         tog_row = ctk.CTkFrame(toggles_card, fg_color="transparent")
         tog_row.pack(fill="x", padx=14, pady=(0, 10))
         
+        self._quick_sw(tog_row, "Transmitir Audio", self.v_audio)
         self._quick_sw(tog_row, "Mantener despierto", self.v_stay_awake)
         self._quick_sw(tog_row, "Apagar pantalla móvil", self.v_screen_off)
         self._quick_sw(tog_row, "Pantalla completa", self.v_fullscreen)
@@ -1563,13 +1564,11 @@ class ScrcpyGUI(ctk.CTk):
         no_control = self.v_no_control.get()
         otg_enabled = self.v_otg_mode.get()
 
-        # If OTG is enabled, it acts as a physical keyboard/mouse, no video/audio.
+        # If OTG is enabled, operate headless (no video stream) with optional audio forwarding
         if otg_enabled:
             is_camera = False
-            audio_enabled = False
             v_display_enabled = False
             self.v_no_video.set(True)
-            self.v_audio.set(False)
 
         # Camera Mode Exclusions
         cam_state = "disabled" if is_camera else "normal"
@@ -1587,18 +1586,20 @@ class ScrcpyGUI(ctk.CTk):
             if cid and cid != "0":
                 self._set_widget_state("camera_facing", "disabled")
 
-        # Controls disabled when camera or no_control or otg_enabled
-        # Wait, OTG needs controls (it IS a control mode), but Scrcpy auto-selects AOA or HID.
-        # We can disable the manual kb/mouse selectors when OTG is enabled, or let the user choose them.
-        # Let's just disable them when no_control or camera is active.
-        ctrl_state = "disabled" if (is_camera or no_control or otg_enabled) else "normal"
+        # Controls disabled when camera or no_control
+        ctrl_state = "disabled" if (is_camera or no_control) else "normal"
         for key in ["kb_menu", "mouse_menu", "gamepad_menu"]:
             self._set_widget_state(key, ctrl_state)
 
-        if is_camera or otg_enabled:
-            self.v_keyboard.set("disabled" if is_camera else "")
-            self.v_mouse.set("disabled" if is_camera else "")
-            self.v_gamepad.set("disabled" if is_camera else "")
+        if is_camera:
+            self.v_keyboard.set("disabled")
+            self.v_mouse.set("disabled")
+            self.v_gamepad.set("disabled")
+        elif otg_enabled:
+            if not self.v_keyboard.get() or self.v_keyboard.get() == "disabled":
+                self.v_keyboard.set("uhid")
+            if not self.v_mouse.get() or self.v_mouse.get() == "disabled":
+                self.v_mouse.set("uhid")
 
         # Audio Exclusions
         aud_state = "normal" if audio_enabled else "disabled"
