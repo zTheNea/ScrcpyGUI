@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-import platform
+
 import re
 import shutil
 import ssl
@@ -17,18 +17,14 @@ from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
+from paths import APP_DIR, SCRCPY_DIR, VERSION_FILE, IS_WINDOWS, ensure_app_dir
+from engine.adb import get_adb_gateway
+
 GITHUB_API = "https://api.github.com/repos/Genymobile/scrcpy/releases/latest"
 
-IS_WINDOWS = platform.system() == "Windows"
 
-if IS_WINDOWS:
-    APP_DIR = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "ScrcpyGUI")
-else:
-    # Linux/MacOS standard path for user data
-    APP_DIR = os.path.join(os.path.expanduser("~"), ".local", "share", "ScrcpyGUI")
-
-SCRCPY_DIR = os.path.join(APP_DIR, "scrcpy")
-VERSION_FILE = os.path.join(APP_DIR, "version.json")
+_last_unauthorized_count: int = 0
+"""Number of unauthorized devices detected in the last :func:`list_devices` call."""
 
 def _subprocess_kwargs() -> dict[str, Any]:
     """Return common subprocess kwargs (hides console window on Windows)."""
@@ -61,7 +57,7 @@ def get_installed_version():
     return ""
 
 def _save_version(ver, url):
-    os.makedirs(APP_DIR, exist_ok=True)
+    ensure_app_dir()
     with open(VERSION_FILE, "w") as f:
         json.dump({"version": ver, "url": url}, f)
 
@@ -82,8 +78,11 @@ def get_ssl_context():
         )
         return None
 
-def check_latest(callback):
-    """Check GitHub for latest release. Calls callback(tag, download_url, error)."""
+def check_latest(callback: Callable[[str, str, Optional[str]], None]) -> None:
+    """Check GitHub for the latest scrcpy release asynchronously.
+
+    Calls ``callback(tag, download_url, error)`` upon completion.
+    """
     def run():
         try:
             req = urllib.request.Request(GITHUB_API, headers={"User-Agent": "ScrcpyGUI"})
@@ -105,15 +104,29 @@ def check_latest(callback):
             callback("", "", str(e))
     threading.Thread(target=run, daemon=True).start()
 
-def download_and_install(url, progress_cb=None, done_cb=None):
-    """Download zip from url, extract to SCRCPY_DIR. (Windows only)"""
+def download_and_install(
+    url: str,
+    progress_cb: Optional[Callable[[float], None]] = None,
+    done_cb: Optional[Callable[[Optional[str]], None]] = None,
+) -> None:
+    """Download scrcpy zip from url and extract to SCRCPY_DIR. (Windows only)
+
+    Parameters
+    ----------
+    url : str
+        The direct asset download URL from GitHub Releases.
+    progress_cb : Callable[[float], None], optional
+        Called with a progress ratio (0.0 to 1.0) or -1 for indeterminate extraction.
+    done_cb : Callable[[Optional[str]], None], optional
+        Called with None on success, or an error string on failure.
+    """
     if not IS_WINDOWS:
         if done_cb: done_cb("Auto-download is only supported on Windows. Please install scrcpy via your package manager.")
         return
 
     def run():
         try:
-            os.makedirs(APP_DIR, exist_ok=True)
+            ensure_app_dir()
             zip_path = os.path.join(APP_DIR, "scrcpy_download.zip")
             # Download
             req = urllib.request.Request(url, headers={"User-Agent": "ScrcpyGUI"})
@@ -132,17 +145,38 @@ def download_and_install(url, progress_cb=None, done_cb=None):
             # Extract
             if progress_cb:
                 progress_cb(-1)  # indeterminate = extracting
-            if os.path.isdir(SCRCPY_DIR):
-                shutil.rmtree(SCRCPY_DIR, ignore_errors=True)
+
+            # Stop adb first to release file locks on Windows binaries/DLLs
+            try:
+                adb_bin = _get_adb_path()
+                if adb_bin and os.path.isfile(adb_bin):
+                    subprocess.run([adb_bin, "kill-server"], **_subprocess_kwargs(), timeout=5)
+            except Exception:
+                pass
+
+            temp_extract = os.path.join(APP_DIR, "_scrcpy_extract_temp")
+            if os.path.isdir(temp_extract):
+                shutil.rmtree(temp_extract, ignore_errors=True)
+            os.makedirs(temp_extract, exist_ok=True)
+
             with zipfile.ZipFile(zip_path, "r") as z:
+                z.extractall(temp_extract)
                 members = z.namelist()
-                # Find the root folder inside zip
                 root = members[0].split("/")[0] if "/" in members[0] else ""
-                z.extractall(APP_DIR)
-                extracted = os.path.join(APP_DIR, root) if root else None
-                if extracted and os.path.isdir(extracted) and extracted != SCRCPY_DIR:
-                    os.rename(extracted, SCRCPY_DIR)
-            os.remove(zip_path)
+                extracted_dir = os.path.join(temp_extract, root) if root and os.path.isdir(os.path.join(temp_extract, root)) else temp_extract
+
+                os.makedirs(SCRCPY_DIR, exist_ok=True)
+                for item in os.listdir(extracted_dir):
+                    s = os.path.join(extracted_dir, item)
+                    d = os.path.join(SCRCPY_DIR, item)
+                    if os.path.isdir(s):
+                        shutil.copytree(s, d, dirs_exist_ok=True)
+                    else:
+                        shutil.copy2(s, d)
+
+            shutil.rmtree(temp_extract, ignore_errors=True)
+            if os.path.isfile(zip_path):
+                os.remove(zip_path)
             if done_cb:
                 done_cb(None)
         except Exception as e:
@@ -157,36 +191,30 @@ def _get_adb_path():
     if os.path.isfile(adb): return adb
     return shutil.which("adb")
 
+
+def is_adb_available() -> bool:
+    """Return True if ADB is reachable on this system."""
+    return _get_adb_path() is not None
+
+
+def get_unauthorized_count() -> int:
+    """Return the number of unauthorized devices from the last :func:`list_devices` call."""
+    return _last_unauthorized_count
+
 def get_device_model(serial):
-    """Get the real device model name via ADB getprop (e.g. 'Samsung Galaxy S24')."""
-    try:
-        adb = _get_adb_path() or "adb"
-        kw = _subprocess_kwargs()
-        # Try manufacturer + model for a full name
-        r_brand = subprocess.run(
-            [adb, "-s", serial, "shell", "getprop", "ro.product.brand"],
-            capture_output=True, text=True, timeout=3, **kw
-        )
-        r_model = subprocess.run(
-            [adb, "-s", serial, "shell", "getprop", "ro.product.model"],
-            capture_output=True, text=True, timeout=3, **kw
-        )
-        brand = r_brand.stdout.strip().capitalize()
-        model = r_model.stdout.strip()
-        if brand and model:
-            # Avoid duplicating brand in model (e.g. "Samsung Samsung Galaxy...")
-            if model.lower().startswith(brand.lower()):
-                return model
-            return f"{brand} {model}"
-        if model:
-            return model
-    except Exception:
-        pass
-    return None
+    """Get the real device model name via ADB getprop with caching."""
+    return get_adb_gateway().get_device_model(serial)
 
 
-def list_devices():
-    """Returns a list of (serial, model) for connected devices."""
+
+def list_devices() -> list[tuple[str, str]]:
+    """Returns a list of (serial, model) for all connected ADB devices.
+
+    Also updates the module-level ``_last_unauthorized_count`` counter, which
+    can be queried via :func:`get_unauthorized_count`.
+    """
+    global _last_unauthorized_count
+    _last_unauthorized_count = 0
     try:
         adb = _get_adb_path() or "adb"
         output = subprocess.check_output(
@@ -196,7 +224,12 @@ def list_devices():
         lines = output.strip().split("\n")[1:]
         devices = []
         for line in lines:
-            if not line.strip() or "offline" in line or "unauthorized" in line:
+            if not line.strip():
+                continue
+            if "unauthorized" in line:
+                _last_unauthorized_count += 1
+                continue
+            if "offline" in line:
                 continue
             parts = line.split()
             serial = parts[0]
@@ -216,8 +249,8 @@ def list_devices():
     except Exception:
         return []
 
-def connect_wifi(ip):
-    """Runs adb connect ip."""
+def connect_wifi(ip: str) -> str:
+    """Connect to a device over TCP/IP (runs ``adb connect ip``)."""
     try:
         adb = _get_adb_path()
         if not adb: return "ADB no encontrado"
@@ -229,8 +262,8 @@ def connect_wifi(ip):
     except Exception as e:
         return str(e)
 
-def pair_wifi(ip_port, code):
-    """Runs adb pair ip:port code."""
+def pair_wifi(ip_port: str, code: str) -> str:
+    """Pair with an Android 11+ wireless debugging host (runs ``adb pair ip:port code``)."""
     try:
         adb = _get_adb_path()
         if not adb: return "ADB no encontrado"
@@ -268,19 +301,19 @@ def _extract_ip(text):
         if ip not in ["127.0.0.1", "0.0.0.0"] and not ip.startswith("169.254"):
             return ip
     return None
-
-def enable_tcpip(serial):
-    """Runs adb tcpip 5555, gets IP using multiple methods, and connects."""
+def enable_tcpip(serial: str) -> str:
+    """Enables TCP/IP on the device via USB, discovers its Wi-Fi IP and connects."""
     try:
         adb = _get_adb_path()
         if not adb: return "ADB no encontrado"
+        if ":" in serial:
+            return f"El dispositivo ya está conectado vía Wi-Fi ({serial})"
         kw = _subprocess_kwargs()
         
         # 1. Enable TCP/IP
         subprocess.run([adb, "-s", serial, "tcpip", "5555"], capture_output=True, text=True, timeout=10, **kw)
         
-        # IMPORTANT: Wait for adbd to restart on the device. 
-        # Without this, the next 'adb shell' command might fail or return empty.
+        # Wait for adbd to restart on the device
         time.sleep(1.5)
         
         # 2. Try multiple ways to get IP address
@@ -299,83 +332,133 @@ def enable_tcpip(serial):
                 
         if not ip:
             # Method C: ip addr show wlan0 (or variations)
-            for iface in ["wlan0", "wlan1", "eth0", "p2p-wlan0-0", "ra0"]:
+            for iface in ["wlan0", "wlan1", "eth0", "p2p-wlan0-0", "ra0", "swlan0"]:
                 r = subprocess.run([adb, "-s", serial, "shell", "ip", "addr", "show", iface], capture_output=True, text=True, timeout=5, **kw)
                 ip = _extract_ip(r.stdout)
                 if ip: break
             
         if not ip:
-            # Method D: generic ip addr show (last resort)
+            # Method D: generic ip addr show
             r = subprocess.run([adb, "-s", serial, "shell", "ip", "addr", "show"], capture_output=True, text=True, timeout=5, **kw)
             ip = _extract_ip(r.stdout)
 
+        if not ip:
+            # Method E: dumpsys wifi or connectivity
+            r = subprocess.run([adb, "-s", serial, "shell", "dumpsys", "connectivity"], capture_output=True, text=True, timeout=5, **kw)
+            ip = _extract_ip(r.stdout)
+
         if ip:
-            # 3. Connect
-            subprocess.run([adb, "connect", f"{ip}:5555"], capture_output=True, text=True, timeout=10, **kw)
-            return f"Conectado a {ip} vía Wi-Fi"
+            # 3. Connect to the discovered IP
+            conn_res = subprocess.run([adb, "connect", f"{ip}:5555"], capture_output=True, text=True, timeout=10, **kw)
+            out = (conn_res.stdout.strip() + " " + conn_res.stderr.strip()).lower()
+            if "connected to" in out or "already connected" in out:
+                return f"Conectado a {ip} vía Wi-Fi"
+            return f"IP detectada ({ip}), pero falló la conexión: {conn_res.stdout.strip() or conn_res.stderr.strip()}"
         return "Modo TCP/IP activo, pero no pude obtener la IP automáticamente. Conéctate manualmente."
     except Exception as e:
         return f"Error: {str(e)}"
 
-def get_installed_apps(device_id):
-    """Escáner Universal Triple: Máxima compatibilidad Android."""
-    try:
-        adb = _get_adb_path() or "adb"
-        raw_output = ""
-        kw = _subprocess_kwargs()
-        
-        # Intentar 3 métodos diferentes por orden de modernidad
-        cmds = [
-            [adb, "-s", device_id, "shell", "cmd", "package", "list", "packages", "-3"],
-            [adb, "-s", device_id, "shell", "pm", "list", "packages"],
-            [adb, "-s", device_id, "shell", "pm", "list", "packages", "-f"]
-        ]
-        
-        for c in cmds:
-            res = subprocess.run(c, capture_output=True, text=True, timeout=5, **kw)
-            if res.stdout and len(res.stdout.strip()) > 10:
-                raw_output = res.stdout
-                break
-        
-        if not raw_output:
-            # Último recurso: Dumpsys filtrado en Python (pipes no funcionan sin shell)
-            res = subprocess.run(
-                [adb, "-s", device_id, "shell", "dumpsys", "package"],
-                capture_output=True, text=True, timeout=10, **kw
-            )
-            # Filtrar líneas que contengan "Package [" y extraer el nombre del paquete
-            for line in res.stdout.splitlines():
-                if "Package [" in line:
-                    try:
-                        pkg = line.split("[")[1].split("]")[0].strip()
-                        if pkg and "." in pkg:
-                            raw_output += f"package:{pkg}\n"
-                    except (IndexError, ValueError):
-                        pass
+POPULAR_APP_NAMES: dict[str, str] = {
+    # Browsers
+    "com.brave.browser": "Brave Browser",
+    "com.android.chrome": "Google Chrome",
+    "org.mozilla.firefox": "Firefox",
+    "com.microsoft.emmx": "Microsoft Edge",
+    "com.opera.browser": "Opera",
+    "com.opera.mini.native": "Opera Mini",
+    "com.duckduckgo.mobile.android": "DuckDuckGo",
+    "org.lineageos.jelly": "Navegador Jelly",
+    # Messaging & Social
+    "com.whatsapp": "WhatsApp",
+    "com.whatsapp.w4b": "WhatsApp Business",
+    "org.telegram.messenger": "Telegram",
+    "org.thunderdog.challegram": "Telegram X",
+    "com.discord": "Discord",
+    "com.instagram.android": "Instagram",
+    "com.facebook.katana": "Facebook",
+    "com.facebook.orca": "Messenger",
+    "com.facebook.lite": "Facebook Lite",
+    "com.zhiliaoapp.musically": "TikTok",
+    "com.twitter.android": "X (Twitter)",
+    "com.snapchat.android": "Snapchat",
+    "com.reddit.frontpage": "Reddit",
+    "com.pinterest": "Pinterest",
+    "com.linkedin.android": "LinkedIn",
+    "com.slack": "Slack",
+    "com.skype.raider": "Skype",
+    "com.viber.voip": "Viber",
+    # Multimedia & Streaming
+    "com.google.android.youtube": "YouTube",
+    "com.google.android.apps.youtube.music": "YouTube Music",
+    "com.spotify.music": "Spotify",
+    "com.netflix.mediaclient": "Netflix",
+    "com.amazon.avod.thirdpartyclient": "Prime Video",
+    "com.disney.disneyplus": "Disney+",
+    "com.max.main": "Max",
+    "tv.twitch.android.app": "Twitch",
+    "org.videolan.vlc": "VLC",
+    "com.crunchyroll.crunchyrollapp": "Crunchyroll",
+    # Google Ecosystem
+    "com.google.android.apps.maps": "Google Maps",
+    "com.google.android.gm": "Gmail",
+    "com.google.android.apps.photos": "Google Fotos",
+    "com.google.android.apps.docs": "Google Drive",
+    "com.google.android.keep": "Google Keep",
+    "com.google.android.calendar": "Google Calendar",
+    "com.google.android.deskclock": "Reloj (Google)",
+    "com.google.android.calculator": "Calculadora (Google)",
+    "com.google.android.googlequicksearchbox": "Google",
+    "com.google.android.apps.translate": "Traductor de Google",
+    # Productivity & Office
+    "com.microsoft.office.word": "Microsoft Word",
+    "com.microsoft.office.excel": "Microsoft Excel",
+    "com.microsoft.office.powerpoint": "PowerPoint",
+    "com.microsoft.office.officehubrow": "Microsoft 365 (Office)",
+    "com.adobe.reader": "Adobe Acrobat Reader",
+    "notion.id": "Notion",
+    # System & Hardware Tools
+    "com.android.vending": "Google Play Store",
+    "com.android.settings": "Ajustes del Sistema",
+    "com.android.camera": "Cámara",
+    "com.android.camera2": "Cámara",
+    "org.lineageos.aperture": "Cámara (Aperture)",
+    "com.android.gallery3d": "Galería",
+    "com.android.documentsui": "Archivos / Descargas",
+    "com.android.calculator2": "Calculadora",
+    "com.android.deskclock": "Reloj y Alarma",
+    "com.android.dialer": "Teléfono",
+    "com.android.contacts": "Contactos",
+    "com.android.messaging": "Mensajes SMS",
+    "com.android.fmradio": "Radio FM",
+    "flar2.devcheck": "DevCheck Hardware",
+    "io.chaldeaprjkt.gamespace": "Game Space",
+    "org.lineageos.eleven": "Reproductor de Música",
+    "org.lineageos.etar": "Calendario (Etar)",
+    "org.lineageos.recorder": "Grabadora de Voz",
+    "org.lineageos.audiofx": "AudioFX",
+    "org.omnirom.logcat": "MatLog / Logcat",
+    "com.google.ar.core": "Google Play Services for AR",
+}
 
-        packages = []
-        for line in raw_output.splitlines():
-            line = line.strip()
-            if not line: continue
-            
-            # Limpiar prefijos comunes de ADB
-            pkg = line.replace("package:", "")
-            if "=" in pkg: pkg = pkg.split("=")[-1] # Caso con ruta de archivo
-            pkg = pkg.strip()
-            
-            if pkg and "." in pkg:
-                # Nombre amigable simple
-                name = pkg.split(".")[-1].capitalize()
-                if name.lower() in ["android", "app", "google"] and len(pkg.split(".")) > 1:
-                    name = pkg.split(".")[-2].capitalize()
-                packages.append((name, pkg))
-        
-        # Eliminar duplicados y ordenar
-        unique_apps = list(set(packages))
-        return sorted(unique_apps, key=lambda x: x[0])
-    except Exception as e:
-        logger.error("Error en escaneo universal: %s", e)
+
+def _clean_app_name(pkg: str) -> str:
+    if pkg in POPULAR_APP_NAMES:
+        return POPULAR_APP_NAMES[pkg]
+    parts = pkg.split(".")
+    meaningful = [p for p in parts if p.lower() not in ("com", "org", "net", "io", "android", "app", "google", "apps", "mobile")]
+    if meaningful:
+        return " ".join(m.capitalize() for m in meaningful[-2:])
+    return parts[-1].capitalize()
+
+
+def get_installed_apps(device_id: str) -> list[tuple[str, str]]:
+    """Scan and return installed launchable and user apps as (friendly_name, package_name) pairs."""
+    clean_serial = device_id.split(" (")[0].strip() if device_id else ""
+    if not clean_serial or "Sin dispositivos" in clean_serial or "Buscando" in clean_serial:
         return []
+    apps = get_adb_gateway().list_installed_apps(clean_serial)
+    return [(a.friendly_name, a.package) for a in apps]
+
 
 
 def run_scrcpy_query(flag: str, device: Optional[str] = None) -> tuple[bool, str]:

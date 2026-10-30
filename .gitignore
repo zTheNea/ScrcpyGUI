@@ -8,13 +8,17 @@ build/
 dist/
 *.manifest
 
-# Scrcpy Data (Downloaded Binaries)
+# Scrcpy Data (Downloaded Binaries & Configs)
 scrcpy/
 version.json
 config.json
+profiles.json
+history.json
+recordings/
 *.bak
 scrcpy_help.txt
 clean_help.txt
+.pytest_cache/
 
 # IDEs
 .vscode/

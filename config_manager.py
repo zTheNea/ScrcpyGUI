@@ -4,42 +4,25 @@ from __future__ import annotations
 import json
 import logging
 import os
-import platform
 import shutil
 from typing import TYPE_CHECKING, Any
+
+from paths import (
+    APP_DIR, CONFIG_FILE, PROFILES_FILE,
+    LEGACY_CONFIG, LEGACY_PROFILES, ensure_app_dir,
+    atomic_write_json, safe_read_json,
+)
 
 if TYPE_CHECKING:  # avoid circular import at runtime
     from scrcpy_gui import ScrcpyGUI
 
 logger = logging.getLogger(__name__)
 
-# ── Data directory (shared with scrcpy_manager.py) ──
-if platform.system() == "Windows":
-    _APP_DIR = os.path.join(
-        os.environ.get("LOCALAPPDATA", os.path.expanduser("~")),
-        "ScrcpyGUI",
-    )
-else:
-    _APP_DIR = os.path.join(os.path.expanduser("~"), ".local", "share", "ScrcpyGUI")
-
-CONFIG_FILE = os.path.join(_APP_DIR, "config.json")
-PROFILES_FILE = os.path.join(_APP_DIR, "profiles.json")
-
-# ── Legacy path (next to the script) for automatic migration ──
-_LEGACY_DIR = os.path.dirname(os.path.abspath(__file__))
-_LEGACY_CONFIG = os.path.join(_LEGACY_DIR, "config.json")
-_LEGACY_PROFILES = os.path.join(_LEGACY_DIR, "profiles.json")
-
-
-def _ensure_app_dir() -> None:
-    """Create the data directory if it doesn't exist."""
-    os.makedirs(_APP_DIR, exist_ok=True)
-
 
 def _migrate_legacy_files() -> None:
     """One-time migration: copy config/profiles from the old location."""
-    _ensure_app_dir()
-    for src, dst in [(_LEGACY_CONFIG, CONFIG_FILE), (_LEGACY_PROFILES, PROFILES_FILE)]:
+    ensure_app_dir()
+    for src, dst in [(LEGACY_CONFIG, CONFIG_FILE), (LEGACY_PROFILES, PROFILES_FILE)]:
         if os.path.isfile(src) and not os.path.isfile(dst):
             try:
                 shutil.copy2(src, dst)
@@ -64,31 +47,53 @@ CONFIG_KEYS: list[str] = [
     "disable_screensaver", "time_limit", "no_vd_decorations",
     "no_vd_destroy", "virtual_dpi", "no_clipboard_sync", "video_buffer",
     # scrcpy v4.0 / v4.1
-    "flex_display", "camera_torch", "camera_zoom", "keep_active",
+    "flex_display", "virtual_mouse", "camera_torch", "camera_zoom", "keep_active",
     "background_color", "no_aspect_ratio_lock", "otg_mode",
     "ignore_encoder_constraints", "no_audio_playback", "no_playback",
     "audio_output_buf", "legacy_paste", "force_adb_forward",
     "camera_high_speed", "kill_adb_on_close",
+    # Phase 1 — high-value missing options
+    "render_fit", "no_video_playback", "video_encoder", "audio_encoder",
+    "record_format", "require_audio",
+    "capture_orientation", "display_orientation",
+    "render_driver", "window_x", "window_y",
+    "power_off_on_close", "no_power_on", "shortcut_mod", "push_target",
+    # Phase 2 — Advanced tab
+    "window_width", "window_height", "no_window",
+    "display_ime_policy", "verbosity", "pause_on_exit",
+    "no_cleanup", "no_downsize_on_error", "screen_off_timeout",
+    "no_key_repeat", "prefer_text", "raw_key_events", "no_mouse_hover",
+    "port", "tunnel_host", "tunnel_port", "no_terminal_title", "angle",
+    # Phase 2 — Camera extras
+    "camera_ar", "camera_size",
+    # scrcpy 5.0 / 5.0.1
+    "hwdec", "start_app_force_stop", "record_orientation",
+    "min_size_alignment", "no_mipmaps",
+    # Wi-Fi Auto
+    "auto_wifi",
 ]
 
 
-def save_config(gui: ScrcpyGUI) -> None:
-    """Save all config variables from the GUI to config.json."""
+def save_config(gui: Any) -> None:
+    """Save all config variables from the GUI to config.json atomically."""
     data: dict[str, Any] = {}
-    data["_active_mode"] = gui.active_mode.get()
+    if hasattr(gui, "active_mode") and hasattr(gui.active_mode, "get"):
+        data["_active_mode"] = gui.active_mode.get()
+    elif hasattr(gui, "goal"):
+        data["_active_mode"] = getattr(gui, "goal")
+
     for key in CONFIG_KEYS:
         var = getattr(gui, f"v_{key}", None)
         if var is not None:
             data[key] = var.get()
     try:
-        _ensure_app_dir()
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+        ensure_app_dir()
+        atomic_write_json(CONFIG_FILE, data, backup=True)
     except Exception as e:
         logger.error("Error saving config: %s", e)
 
 
-def load_config(gui: ScrcpyGUI) -> tuple[bool, str]:
+def load_config(gui: Any) -> tuple[bool, str]:
     """Load config from config.json and apply to GUI variables.
 
     Returns
@@ -109,6 +114,11 @@ def load_config(gui: ScrcpyGUI) -> tuple[bool, str]:
                     var.set(value)
                 except Exception:
                     pass
+        if hasattr(gui, "goal") and saved_mode:
+            try:
+                gui.goal = saved_mode
+            except Exception:
+                pass
         return (True, saved_mode)
     except Exception as e:
         # Backup the corrupt file for debugging
@@ -121,24 +131,19 @@ def load_config(gui: ScrcpyGUI) -> tuple[bool, str]:
 
 
 def _read_profiles() -> dict[str, dict[str, Any]]:
-    """Read profiles.json, return dict."""
-    if not os.path.isfile(PROFILES_FILE):
-        return {}
-    try:
-        with open(PROFILES_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
+    """Read profiles.json safely."""
+    res = safe_read_json(PROFILES_FILE, default={})
+    return res if isinstance(res, dict) else {}
 
 
 def _write_profiles(profiles: dict[str, dict[str, Any]]) -> None:
-    """Write profiles dict to profiles.json."""
+    """Write profiles dict to profiles.json atomically."""
     try:
-        _ensure_app_dir()
-        with open(PROFILES_FILE, "w", encoding="utf-8") as f:
-            json.dump(profiles, f, indent=2, ensure_ascii=False)
+        ensure_app_dir()
+        atomic_write_json(PROFILES_FILE, profiles, backup=True)
     except Exception as e:
         logger.error("Error saving profiles: %s", e)
+
 
 
 def list_profiles() -> list[str]:
@@ -146,20 +151,40 @@ def list_profiles() -> list[str]:
     return list(_read_profiles().keys())
 
 
-def save_profile(gui: ScrcpyGUI, name: str) -> None:
+def get_profile_data(name: str) -> dict[str, Any]:
+    """Return dictionary of a specific profile or empty dict if not found."""
+    return _read_profiles().get(name, {})
+
+
+def save_profile(gui: Any, name: str) -> None:
     """Save current GUI state as a named profile."""
+    # Allow (gui, name) or (name, gui)
+    if isinstance(gui, str) and not isinstance(name, str):
+        gui, name = name, gui
+
     profiles = _read_profiles()
     data: dict[str, Any] = {}
     for key in CONFIG_KEYS:
         var = getattr(gui, f"v_{key}", None)
         if var is not None:
             data[key] = var.get()
+
+    # Preserve goal/preset tag if available
+    if hasattr(gui, "goal"):
+        data["_goal"] = getattr(gui, "goal")
+    elif hasattr(gui, "active_mode") and hasattr(gui.active_mode, "get"):
+        data["_goal"] = gui.active_mode.get()
+
     profiles[name] = data
     _write_profiles(profiles)
 
 
-def load_profile(gui: ScrcpyGUI, name: str) -> bool:
+def load_profile(gui: Any, name: str) -> bool:
     """Load a named profile into the GUI. Returns True on success."""
+    # Allow (gui, name) or (name, gui)
+    if isinstance(gui, str) and not isinstance(name, str):
+        gui, name = name, gui
+
     profiles = _read_profiles()
     if name not in profiles:
         return False
@@ -171,6 +196,13 @@ def load_profile(gui: ScrcpyGUI, name: str) -> bool:
                 var.set(value)
             except Exception:
                 pass
+
+    if "_goal" in data and hasattr(gui, "goal"):
+        try:
+            gui.goal = data["_goal"]
+        except Exception:
+            pass
+
     return True
 
 
@@ -182,3 +214,4 @@ def delete_profile(name: str) -> bool:
         _write_profiles(profiles)
         return True
     return False
+

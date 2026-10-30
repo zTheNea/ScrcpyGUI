@@ -1,6 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-
 import os
 import customtkinter
 
@@ -8,10 +7,22 @@ ctk_path = os.path.dirname(customtkinter.__file__)
 
 a = Analysis(
     ['scrcpy_gui.py'],
-    pathex=[],
+    pathex=['.'],
     binaries=[],
     datas=[(ctk_path, 'customtkinter')],
-    hiddenimports=[],
+    hiddenimports=[
+        'customtkinter',
+        'gui',
+        'gui.widgets',
+        'paths',
+        'strings',
+        'presets',
+        'command_builder',
+        'config_manager',
+        'scrcpy_manager',
+        'history_manager',
+        'diagnostics',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

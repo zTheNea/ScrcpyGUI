@@ -1,4 +1,20 @@
 """GUI package for ScrcpyGUI."""
-from scrcpy_gui import ScrcpyGUI
+from gui.widgets import (
+    InlineAppPicker,
+    cfg_entry,
+    cfg_group,
+    cfg_group_full,
+    cfg_option_menu,
+    cfg_slider,
+    cfg_switch,
+)
 
-__all__ = ["ScrcpyGUI"]
+__all__ = [
+    "cfg_group",
+    "cfg_group_full",
+    "cfg_option_menu",
+    "cfg_entry",
+    "cfg_slider",
+    "cfg_switch",
+    "InlineAppPicker",
+]
