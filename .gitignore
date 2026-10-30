@@ -20,11 +20,12 @@ scrcpy_help.txt
 clean_help.txt
 .pytest_cache/
 
-# IDEs
+# IDEs & Agents
 .vscode/
 .idea/
 .project
 .pydevproject
+.agents/
 
 # OS
 Thumbs.db
