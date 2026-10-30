@@ -5,6 +5,12 @@ from ui.app_window import AppWindow
 
 
 def main():
+    if "--legacy" in sys.argv:
+        from scrcpy_gui import ScrcpyGUI
+        app = ScrcpyGUI()
+        app.mainloop()
+        return
+
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     win = AppWindow()
