@@ -134,5 +134,4 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon='ui/assets/icon.ico',
-    version='version_info.txt',
 )
