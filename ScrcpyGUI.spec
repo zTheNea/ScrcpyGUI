@@ -9,7 +9,10 @@ a = Analysis(
     ['main.py'],
     pathex=['.'],
     binaries=[],
-    datas=[(ctk_path, 'customtkinter')],
+    datas=[
+        (ctk_path, 'customtkinter'),
+        ('ui/assets', 'ui/assets'),
+    ],
     hiddenimports=[
         'customtkinter',
         'PySide6',
@@ -72,4 +75,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon='ui/assets/icon.ico',
 )

@@ -31,6 +31,10 @@ class AppWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Scrcpy Studio v2.0.0 — Centro de Control Móvil")
+        from paths import get_asset_path
+        icon_path = get_asset_path(os.path.join("ui", "assets", "icon.ico"))
+        if os.path.isfile(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
         self.resize(1180, 760)
         self.setMinimumSize(960, 620)
         self.setObjectName("root")

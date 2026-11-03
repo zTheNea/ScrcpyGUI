@@ -46,6 +46,13 @@ def ensure_app_dir() -> None:
     os.makedirs(APP_DIR, exist_ok=True)
 
 
+def get_asset_path(rel_path: str) -> str:
+    """Resolve bundled asset path for both source execution and PyInstaller builds."""
+    import sys
+    base = getattr(sys, "_MEIPASS", LEGACY_DIR)
+    return os.path.join(base, rel_path)
+
+
 RECORDINGS_DIR: str = os.path.join(
     os.path.expanduser("~"),
     "Videos",
