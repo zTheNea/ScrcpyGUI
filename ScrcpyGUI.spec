@@ -134,4 +134,9 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon='ui/assets/icon.ico',
+    cdict={
+        'EXTENSION': False,
+        'DATA': False,
+        'BINARY': False,
+    },
 )
