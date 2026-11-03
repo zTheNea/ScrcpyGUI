@@ -1,20 +1,15 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 import os
-import customtkinter
-
-ctk_path = os.path.dirname(customtkinter.__file__)
 
 a = Analysis(
     ['main.py'],
     pathex=['.'],
     binaries=[],
     datas=[
-        (ctk_path, 'customtkinter'),
         ('ui/assets', 'ui/assets'),
     ],
     hiddenimports=[
-        'customtkinter',
         'PySide6',
         'PySide6.QtCore',
         'PySide6.QtGui',
@@ -35,8 +30,6 @@ a = Analysis(
         'ui.nav',
         'engine',
         'engine.adb',
-        'gui',
-        'gui.widgets',
         'paths',
         'strings',
         'presets',
@@ -45,12 +38,17 @@ a = Analysis(
         'scrcpy_manager',
         'history_manager',
         'diagnostics',
-        'scrcpy_gui',
     ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
+        'customtkinter',
+        'tkinter',
+        '_tkinter',
+        'tkinter.ttk',
+        'tcl',
+        'turtle',
         'numpy',
         'psutil',
         'win32pdh',

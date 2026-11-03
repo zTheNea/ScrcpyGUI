@@ -49,7 +49,7 @@ def ensure_app_dir() -> None:
 def get_asset_path(rel_path: str) -> str:
     """Resolve bundled asset path for both source execution and PyInstaller builds."""
     import sys
-    base = getattr(sys, "_MEIPASS", LEGACY_DIR)
+    base = getattr(sys, "_SGYPASS", getattr(sys, "_MEIPASS", LEGACY_DIR))
     return os.path.join(base, rel_path)
 
 

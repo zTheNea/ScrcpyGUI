@@ -9,8 +9,9 @@ from ui.app_window import AppWindow
 
 def main():
     if "--legacy" in sys.argv:
-        from scrcpy_gui import ScrcpyGUI
-        app = ScrcpyGUI()
+        import importlib
+        scrcpy_mod = importlib.import_module("scrcpy_gui")
+        app = scrcpy_mod.ScrcpyGUI()
         app.mainloop()
         return
 
