@@ -1,7 +1,7 @@
 # Scrcpy Studio v2.0.0 (ScrcpyGUI)
 
 > [!IMPORTANT]
-> **Aviso Legal / Disclaimer**: Scrcpy Studio es una interfaz grafica (GUI) independiente y no oficial disenada para facilitar el uso de [scrcpy](https://github.com/Genymobile/scrcpy). Este proyecto es un **complemento** y no esta afiliado, asociado ni respaldado por **Genymobile** ni por los desarrolladores originales de scrcpy. Todas las marcas comerciales y el motor de streaming pertenecen a sus respectivos duenos.
+> **Aviso Legal / Disclaimer**: Scrcpy Studio es una interfaz grafica (GUI) independiente y no oficial disenada para facilitar el uso de [scrcpy](https://github.com/Genymobile/scrcpy). Este proyecto es un **complemento** y no esta afiliado, asociado ni respaldado por **Genymobile** ni por los desarrolladores originales de scrcpy. Todas las marcas comerciales y el motor de streaming pertenecen a sus respectivos dueños.
 
 Una suite visual profesional, moderna y optimizada para la gestion, control y transmision de dispositivos Android mediante `scrcpy`. Disenada con una arquitectura desacoplada en PySide6 (Qt) con estetica glassmorphism contemporanea, motor backend unificado (`engine/adb.py`) con telemetria en tiempo real y soporte integral para **scrcpy 5.0+**.
 
