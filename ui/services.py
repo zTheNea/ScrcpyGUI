@@ -217,7 +217,13 @@ class SessionManager(QObject):
     def start(self, cfg: dict, caps: Optional[dict] = None) -> bool:
         exe = mgr.get_scrcpy_path()
         if not exe:
-            self.failed.emit(Diagnosis("scrcpy no está instalado.", fix_label="Descargar scrcpy", action="download"))
+            self.failed.emit(
+                Diagnosis(
+                    "scrcpy no está instalado en este equipo.",
+                    fix_label="Ir a Ajustes e Instalar",
+                    action="download",
+                )
+            )
             return False
         ok, msgs = self.preflight(cfg, caps)
         for m in msgs:

@@ -1,15 +1,18 @@
 """Master window for Scrcpy Studio: Navigation Rail, Pages Stack, and Console Drawer."""
 from __future__ import annotations
 
+import os
 from typing import Optional
 from PySide6.QtCore import Qt, QSize, QTimer
 from PySide6.QtGui import QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QStackedWidget,
-    QFrame, QPushButton, QLabel, QPlainTextEdit, QSplitter, QApplication
+    QFrame, QPushButton, QLabel, QPlainTextEdit, QSplitter, QApplication,
+    QMessageBox
 )
 
 import config_manager as cfg
+import scrcpy_manager as mgr
 from .theme import C, stylesheet
 from .state import AppState
 from .services import SessionManager
@@ -48,6 +51,9 @@ class AppWindow(QMainWindow):
 
         # Apply global theme stylesheet
         self.setStyleSheet(stylesheet())
+
+        # Check if scrcpy is installed on startup
+        QTimer.singleShot(250, self._check_scrcpy_on_startup)
 
     def _build_ui(self):
         central = QWidget()
@@ -183,6 +189,7 @@ class AppWindow(QMainWindow):
         self.page_home.launch_requested.connect(self._start_mirror)
         self.page_home.stop_all_requested.connect(self.session_mgr.stop_all)
         self.page_home.open_devices_tab.connect(lambda: self.navigate_to(1))
+        self.page_home.open_settings_tab.connect(self._go_to_settings_for_install)
         self.page_home.wifi_auto_connected.connect(
             lambda msg, ip: self.toast.show_message(f"🎉 {msg}. ¡Ya puedes desconectar el cable USB!", kind="ok", ms=6000)
         )
@@ -196,6 +203,9 @@ class AppWindow(QMainWindow):
         # Profiles signals
         self.page_profiles.profile_loaded.connect(self._on_profile_loaded)
 
+        # Settings signals
+        self.page_settings.scrcpy_installed.connect(self._on_scrcpy_installed)
+
         # Session Manager signals
         self.session_mgr.log.connect(self._append_log)
         self.session_mgr.started.connect(lambda t: self.toast.show_message(f"🚀 Sesión iniciada: {t}", kind="ok"))
@@ -204,6 +214,34 @@ class AppWindow(QMainWindow):
 
         # State subscription for device indicator
         self.state.subscribe(self._on_state_change)
+
+    def _check_scrcpy_on_startup(self):
+        """If scrcpy is missing at startup, show a clear notice and navigate to Settings for 1-click install."""
+        if mgr.get_scrcpy_path():
+            return
+
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Information)
+        msg.setWindowTitle("Instalación de Scrcpy Requerida")
+        msg.setText("⚠️ No se detectó el motor scrcpy instalado en este equipo.")
+        msg.setInformativeText(
+            "Scrcpy Studio necesita el paquete oficial (scrcpy + ADB) para proyectar y "
+            "controlar tu teléfono Android.\n\n"
+            "Te llevaremos a la pestaña de Ajustes donde podrás instalarlo automáticamente "
+            "con solo presionar un botón."
+        )
+        btn_go = msg.addButton("Ir a Ajustes e Instalar", QMessageBox.AcceptRole)
+        msg.setDefaultButton(btn_go)
+        msg.exec()
+        self._go_to_settings_for_install()
+
+    def _go_to_settings_for_install(self):
+        self.navigate_to(4)
+        self.page_settings.focus_install_button()
+
+    def _on_scrcpy_installed(self, tag: str):
+        self.toast.show_message(f"✅ ¡Scrcpy {tag} instalado y listo para usar!", kind="ok", ms=6000)
+        self.page_home.refresh_devices()
 
     def _on_recorded(self, sid: str, path: str):
         fn = os.path.basename(path)

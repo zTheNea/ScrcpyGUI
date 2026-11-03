@@ -66,6 +66,7 @@ class HomePage(QWidget):
     launch_requested = Signal()
     stop_all_requested = Signal()
     open_devices_tab = Signal()
+    open_settings_tab = Signal()
     wifi_auto_connected = Signal(str, str)
     wifi_auto_failed = Signal(str)
 
@@ -384,6 +385,9 @@ class HomePage(QWidget):
         if diag.action == "refresh":
             self.refresh_devices()
             return
+        if diag.action == "download":
+            self.open_settings_tab.emit()
+            return
         if diag.fix:
             for k, v in diag.fix.items():
                 self.state.set(k, v)
@@ -446,23 +450,39 @@ class HomePage(QWidget):
         self.current_device = None
         self._clear_layout(self.device_frame_lay)
 
+        scrcpy_missing = not mgr.get_scrcpy_path()
+
         top_row = QHBoxLayout()
-        icon = QLabel("🔌")
+        icon = QLabel("⚠️" if scrcpy_missing else "🔌")
         icon.setStyleSheet("font-size: 24px;")
         top_row.addWidget(icon)
 
         title_box = QVBoxLayout()
         title_box.setSpacing(2)
-        lbl_t = QLabel("No se detectó ningún dispositivo conectado")
+        lbl_t = QLabel(
+            "Motor Scrcpy no instalado" if scrcpy_missing else "No se detectó ningún dispositivo conectado"
+        )
         lbl_t.setObjectName("h2")
-        lbl_s = QLabel(reason or "Sigue estos 3 pasos rápidos en tu móvil Android para conectar:")
+        lbl_s = QLabel(
+            "Ve a Ajustes para instalar automáticamente scrcpy y ADB con un solo clic."
+            if scrcpy_missing
+            else (reason or "Sigue estos 3 pasos rápidos en tu móvil Android para conectar:")
+        )
         lbl_s.setObjectName("sub")
         title_box.addWidget(lbl_t)
         title_box.addWidget(lbl_s)
         top_row.addLayout(title_box, 1)
 
+        if scrcpy_missing:
+            btn_go_settings = QPushButton("⚙️ Ir a Ajustes e Instalar")
+            btn_go_settings.setObjectName("primary")
+            btn_go_settings.setCursor(Qt.PointingHandCursor)
+            btn_go_settings.clicked.connect(self.open_settings_tab.emit)
+            top_row.addWidget(btn_go_settings)
+
         btn_retry = QPushButton("Buscar de nuevo")
-        btn_retry.setObjectName("primary")
+        if not scrcpy_missing:
+            btn_retry.setObjectName("primary")
         btn_retry.setCursor(Qt.PointingHandCursor)
         btn_retry.clicked.connect(self.refresh_devices)
         top_row.addWidget(btn_retry)

@@ -2,15 +2,15 @@
 from __future__ import annotations
 
 import os
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QFrame, QMessageBox
+    QFrame, QMessageBox, QProgressBar
 )
 
 import scrcpy_manager as mgr
 import config_manager as cfg
-from .theme import C
+from .theme import C, RADIUS_CARD
 from .state import AppState
 from .widgets import card, hline
 from .services import run_async, restart_adb_server
@@ -21,9 +21,25 @@ from paths import RECORDINGS_DIR
 class SettingsPage(QWidget):
     """System configuration, scrcpy binary manager, and global defaults."""
 
+    scrcpy_installed = Signal(str)
+    _sig_check_done = Signal(str, str, str)
+    _sig_dl_progress = Signal(float)
+    _sig_dl_done = Signal(str)
+
     def __init__(self, state: AppState, parent=None):
         super().__init__(parent)
         self.state = state
+        self._auto_install_after_check = False
+        self._pending_update_tag = ""
+        self._pending_update_url = ""
+        self._downloading_tag = ""
+        self._downloading_url = ""
+        self._is_downloading = False
+
+        self._sig_check_done.connect(self._on_check_done)
+        self._sig_dl_progress.connect(self._on_dl_progress)
+        self._sig_dl_done.connect(self._on_dl_done)
+
         self._build_ui()
         self.refresh()
 
@@ -46,8 +62,8 @@ class SettingsPage(QWidget):
         root.addLayout(head)
 
         # Engine Card
-        engine_card = card("cardElevated")
-        eng_lay = QVBoxLayout(engine_card)
+        self.engine_card = card("cardElevated")
+        eng_lay = QVBoxLayout(self.engine_card)
         eng_lay.setContentsMargins(18, 14, 18, 14)
         eng_lay.setSpacing(12)
 
@@ -57,25 +73,32 @@ class SettingsPage(QWidget):
 
         self.lbl_scrcpy_path = QLabel("Buscando scrcpy...")
         self.lbl_scrcpy_path.setObjectName("sub")
+        self.lbl_scrcpy_path.setWordWrap(True)
         eng_lay.addWidget(self.lbl_scrcpy_path)
 
         self.lbl_scrcpy_ver = QLabel("")
         self.lbl_scrcpy_ver.setObjectName("mono")
+        self.lbl_scrcpy_ver.setWordWrap(True)
         eng_lay.addWidget(self.lbl_scrcpy_ver)
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(10)
 
+        self.btn_install_scrcpy = QPushButton("⬇️ Instalar Scrcpy Ahora")
+        self.btn_install_scrcpy.setObjectName("primary")
+        self.btn_install_scrcpy.setCursor(Qt.PointingHandCursor)
+        self.btn_install_scrcpy.clicked.connect(self._install_scrcpy_one_click)
+        btn_row.addWidget(self.btn_install_scrcpy)
+
         self.btn_check_update = QPushButton("🔄 Buscar Actualizaciones")
-        self.btn_check_update.setObjectName("primary")
         self.btn_check_update.setCursor(Qt.PointingHandCursor)
         self.btn_check_update.clicked.connect(self._check_scrcpy_updates)
         btn_row.addWidget(self.btn_check_update)
 
-        btn_open_folder = QPushButton("📂 Abrir Carpeta Scrcpy")
-        btn_open_folder.setCursor(Qt.PointingHandCursor)
-        btn_open_folder.clicked.connect(self._open_scrcpy_folder)
-        btn_row.addWidget(btn_open_folder)
+        self.btn_open_folder = QPushButton("📂 Abrir Carpeta Scrcpy")
+        self.btn_open_folder.setCursor(Qt.PointingHandCursor)
+        self.btn_open_folder.clicked.connect(self._open_scrcpy_folder)
+        btn_row.addWidget(self.btn_open_folder)
 
         self.btn_restart_adb = QPushButton("🔌 Reiniciar Servidor ADB")
         self.btn_restart_adb.setCursor(Qt.PointingHandCursor)
@@ -86,11 +109,18 @@ class SettingsPage(QWidget):
         btn_row.addStretch()
         eng_lay.addLayout(btn_row)
 
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setFixedHeight(10)
+        self.progress_bar.setTextVisible(False)
+        self.progress_bar.hide()
+        eng_lay.addWidget(self.progress_bar)
+
         self.lbl_update_status = QLabel("")
         self.lbl_update_status.setObjectName("sub")
+        self.lbl_update_status.setWordWrap(True)
         eng_lay.addWidget(self.lbl_update_status)
 
-        root.addWidget(engine_card)
+        root.addWidget(self.engine_card)
 
         # Advanced Parameters Card
         adv_card = card("cardElevated")
@@ -174,16 +204,51 @@ class SettingsPage(QWidget):
         root.addStretch()
 
     def refresh(self):
+        if self._is_downloading:
+            return
+
         exe = mgr.get_scrcpy_path()
         ver = mgr.get_installed_version()
         adb = mgr._get_adb_path()
 
         if exe:
-            self.lbl_scrcpy_path.setText(f"Ruta ejecutable: {exe}\nRuta ADB: {adb or 'Detectado en sistema'}")
+            self.engine_card.setStyleSheet("")
+            self.lbl_scrcpy_path.setText(f"✅ Ruta ejecutable: {exe}\n🔌 Ruta ADB: {adb or 'Detectado en sistema'}")
+            self.lbl_scrcpy_Path_color = C["text2"]
             self.lbl_scrcpy_ver.setText(f"Versión de motor: {ver or 'scrcpy activo'}")
+            if self._pending_update_tag:
+                self.btn_install_scrcpy.setText(f"⬇️ Instalar Actualización ({self._pending_update_tag})")
+                self.btn_install_scrcpy.setObjectName("primary")
+                self.btn_check_update.setObjectName("")
+            else:
+                self.btn_install_scrcpy.setText("⬇️ Reinstalar Scrcpy")
+                self.btn_install_scrcpy.setObjectName("")
+                self.btn_check_update.setObjectName("primary")
+            self.btn_check_update.show()
+            self.btn_open_folder.setEnabled(True)
+            self.btn_restart_adb.setEnabled(True)
         else:
-            self.lbl_scrcpy_path.setText("❌ scrcpy no está instalado o no se encuentra en la ruta.")
-            self.lbl_scrcpy_ver.setText("")
+            self.engine_card.setStyleSheet(
+                f"QFrame#cardElevated {{ border: 1px solid {C['warning']}; border-radius: {RADIUS_CARD}px; }}"
+            )
+            self.lbl_scrcpy_path.setText("⚠️ scrcpy no está instalado en este equipo.")
+            self.lbl_scrcpy_ver.setText(
+                "Presiona el botón de abajo para descargar e instalar automáticamente scrcpy y ADB en un solo clic."
+            )
+            self.btn_install_scrcpy.setText("⬇️ Instalar Scrcpy Ahora")
+            self.btn_install_scrcpy.setObjectName("primary")
+            self.btn_check_update.hide()
+            self.btn_open_folder.setEnabled(False)
+            self.btn_restart_adb.setEnabled(False)
+
+        for btn in (self.btn_install_scrcpy, self.btn_check_update):
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
+
+    def focus_install_button(self):
+        """Highlight and focus the 1-click install button when navigated from missing scrcpy prompt."""
+        self.refresh()
+        self.btn_install_scrcpy.setFocus()
 
     def _open_scrcpy_folder(self):
         exe = mgr.get_scrcpy_path()
@@ -201,6 +266,7 @@ class SettingsPage(QWidget):
 
     def _restart_adb(self):
         self.btn_restart_adb.setEnabled(False)
+        self.lbl_update_status.setStyleSheet("")
         self.lbl_update_status.setText("Reiniciando servidor ADB...")
 
         def on_done(ok: bool, msg: str):
@@ -213,22 +279,135 @@ class SettingsPage(QWidget):
 
         restart_adb_server(on_done)
 
+    def _install_scrcpy_one_click(self):
+        """1-Click install or update scrcpy: fetches latest release if needed, then downloads & extracts."""
+        if self._is_downloading:
+            return
+
+        if self._pending_update_url and self._pending_update_tag:
+            self._start_download(self._pending_update_tag, self._pending_update_url)
+            return
+
+        self._auto_install_after_check = True
+        self.btn_install_scrcpy.setEnabled(False)
+        self.btn_check_update.setEnabled(False)
+        self.btn_install_scrcpy.setText("⏳ Preparando instalación...")
+        self.progress_bar.setRange(0, 0)
+        self.progress_bar.show()
+        self.lbl_update_status.setStyleSheet(f"color: {C['cyan_bright']};")
+        self.lbl_update_status.setText("🔍 Conectando con el repositorio oficial de scrcpy en GitHub...")
+
+        mgr.check_latest(lambda tag, url, err: self._sig_check_done.emit(tag or "", url or "", err or ""))
+
     def _check_scrcpy_updates(self):
+        if self._is_downloading:
+            return
+        self._auto_install_after_check = False
+        self.lbl_update_status.setStyleSheet("")
         self.lbl_update_status.setText("Comprobando repositorio oficial de scrcpy...")
         self.btn_check_update.setEnabled(False)
+        self.btn_install_scrcpy.setEnabled(False)
 
-        def cb(tag, url, err):
+        mgr.check_latest(lambda tag, url, err: self._sig_check_done.emit(tag or "", url or "", err or ""))
+
+    def _on_check_done(self, tag: str, url: str, err: str):
+        auto_install = self._auto_install_after_check
+        self._auto_install_after_check = False
+
+        if err:
+            self.progress_bar.hide()
             self.btn_check_update.setEnabled(True)
-            if err:
-                self.lbl_update_status.setText(f"No se pudo comprobar actualización: {err}")
-            elif tag:
-                cur = mgr.get_installed_version()
-                if tag != cur:
-                    self.lbl_update_status.setText(f"🌟 Nueva versión disponible: {tag}. (Actual: {cur or 'desconocida'})")
-                else:
-                    self.lbl_update_status.setText(f"✓ Estás al día con la última versión de scrcpy ({cur}).")
+            self.btn_install_scrcpy.setEnabled(True)
+            self.lbl_update_status.setStyleSheet(f"color: {C['danger']};")
+            self.lbl_update_status.setText(f"❌ No se pudo conectar con GitHub: {err}")
+            self.refresh()
+            return
 
-        mgr.check_latest(cb)
+        if auto_install:
+            if not url:
+                self.progress_bar.hide()
+                self.btn_check_update.setEnabled(True)
+                self.btn_install_scrcpy.setEnabled(True)
+                self.lbl_update_status.setStyleSheet(f"color: {C['warning']};")
+                self.lbl_update_status.setText(
+                    "⚠️ La descarga automática directa solo está disponible para Windows (64-bit)."
+                )
+                self.refresh()
+                return
+            self._start_download(tag or "latest", url)
+            return
+
+        # Manual check only
+        self.btn_check_update.setEnabled(True)
+        self.btn_install_scrcpy.setEnabled(True)
+        if tag:
+            cur = mgr.get_installed_version()
+            if tag != cur:
+                self._pending_update_tag = tag
+                self._pending_update_url = url
+                self.lbl_update_status.setStyleSheet(f"color: {C['cyan_bright']}; font-weight: 600;")
+                self.lbl_update_status.setText(
+                    f"🌟 Nueva versión disponible: {tag} (Actual: {cur or 'desconocida'}). "
+                    f"Presiona 'Instalar Actualización' para actualizar con un clic."
+                )
+            else:
+                self._pending_update_tag = ""
+                self._pending_update_url = ""
+                self.lbl_update_status.setStyleSheet(f"color: {C['success']};")
+                self.lbl_update_status.setText(f"✓ Estás al día con la última versión de scrcpy ({cur}).")
+        self.refresh()
+
+    def _start_download(self, tag: str, url: str):
+        self._is_downloading = True
+        self._downloading_tag = tag
+        self._downloading_url = url
+        self.btn_install_scrcpy.setEnabled(False)
+        self.btn_check_update.setEnabled(False)
+        self.btn_install_scrcpy.setText(f"⏳ Instalando {tag}...")
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.show()
+        self.lbl_update_status.setStyleSheet(f"color: {C['cyan_bright']};")
+        self.lbl_update_status.setText(f"⬇️ Descargando scrcpy {tag}... 0%")
+
+        mgr.download_and_install(
+            url,
+            progress_cb=lambda r: self._sig_dl_progress.emit(float(r)),
+            done_cb=lambda e: self._sig_dl_done.emit(e or ""),
+        )
+
+    def _on_dl_progress(self, ratio: float):
+        if ratio < 0:
+            self.progress_bar.setRange(0, 0)
+            self.lbl_update_status.setText(
+                f"📦 Extrayendo e instalando scrcpy {self._downloading_tag} y ADB..."
+            )
+        else:
+            pct = max(0, min(100, int(ratio * 100)))
+            self.progress_bar.setRange(0, 100)
+            self.progress_bar.setValue(pct)
+            self.lbl_update_status.setText(f"⬇️ Descargando scrcpy {self._downloading_tag}... {pct}%")
+
+    def _on_dl_done(self, err: str):
+        self._is_downloading = False
+        self.progress_bar.hide()
+        self.btn_install_scrcpy.setEnabled(True)
+        self.btn_check_update.setEnabled(True)
+
+        if err:
+            self.lbl_update_status.setStyleSheet(f"color: {C['danger']};")
+            self.lbl_update_status.setText(f"❌ Error al instalar scrcpy: {err}")
+            self.refresh()
+            return
+
+        tag = self._downloading_tag or "latest"
+        mgr._save_version(tag, self._downloading_url)
+        self._pending_update_tag = ""
+        self._pending_update_url = ""
+        self.lbl_update_status.setStyleSheet(f"color: {C['success']}; font-weight: 600;")
+        self.lbl_update_status.setText(f"✅ ¡Scrcpy {tag} y ADB instalados correctamente! El programa ya está listo.")
+        self.refresh()
+        self.scrcpy_installed.emit(tag)
 
     def _reset_defaults(self):
         reply = QMessageBox.question(

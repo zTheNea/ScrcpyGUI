@@ -293,6 +293,65 @@ class TestUiStudio(unittest.TestCase):
         # Clean up
         cfg.delete_profile("TestProfileOrderAgnostic")
 
+    def test_settings_one_click_install_flow(self):
+        """SettingsPage must support 1-click scrcpy installation when scrcpy is missing."""
+        import sys
+        from unittest.mock import patch
+        from PySide6.QtWidgets import QApplication
+        from ui.settings import SettingsPage
+
+        _ = QApplication.instance() or QApplication(sys.argv)
+
+        with patch("scrcpy_manager.get_scrcpy_path", return_value=None):
+            page = SettingsPage(self.state)
+            self.assertIn("Instalar Scrcpy Ahora", page.btn_install_scrcpy.text())
+            self.assertTrue(page.btn_check_update.isHidden())
+            self.assertFalse(page.btn_open_folder.isEnabled())
+
+        installed_tags = []
+        page.scrcpy_installed.connect(lambda tag: installed_tags.append(tag))
+
+        def fake_check_latest(cb):
+            cb("v3.1", "https://example.com/scrcpy-win64-v3.1.zip", None)
+
+        def fake_download_and_install(url, progress_cb=None, done_cb=None):
+            if progress_cb:
+                progress_cb(0.5)
+                progress_cb(-1)
+            if done_cb:
+                done_cb(None)
+
+        with patch("scrcpy_manager.check_latest", side_effect=fake_check_latest), \
+             patch("scrcpy_manager.download_and_install", side_effect=fake_download_and_install), \
+             patch("scrcpy_manager._save_version") as mock_save, \
+             patch("scrcpy_manager.get_scrcpy_path", return_value="C:/scrcpy/scrcpy.exe"), \
+             patch("scrcpy_manager.get_installed_version", return_value="v3.1"):
+            page._install_scrcpy_one_click()
+            mock_save.assert_called_once_with("v3.1", "https://example.com/scrcpy-win64-v3.1.zip")
+            self.assertEqual(installed_tags, ["v3.1"])
+            self.assertIn("instalados correctamente", page.lbl_update_status.text())
+            self.assertTrue(page.btn_open_folder.isEnabled())
+
+    def test_home_diagnosis_download_navigates_to_settings(self):
+        """HomePage diagnosis banner with action='download' must emit open_settings_tab."""
+        import sys
+        from unittest.mock import patch
+        from PySide6.QtWidgets import QApplication
+        from ui.home import HomePage
+        from ui.services import SessionManager, Diagnosis
+
+        _ = QApplication.instance() or QApplication(sys.argv)
+        sm = SessionManager()
+        with patch("ui.home.HomePage.refresh_devices"):
+            home = HomePage(self.state, sm)
+
+        navigated = []
+        home.open_settings_tab.connect(lambda: navigated.append(True))
+
+        home._on_session_failed(Diagnosis("scrcpy no está instalado.", fix_label="Ir a Ajustes e Instalar", action="download"))
+        home._apply_diagnosis_fix()
+        self.assertEqual(navigated, [True])
+
 
 if __name__ == "__main__":
     unittest.main()

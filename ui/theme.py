@@ -126,12 +126,16 @@ QScrollBar::handle:vertical:hover {{ background: {c['cyan']}; }}
 QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; width: 0; }}
 QScrollBar:horizontal {{ height: 0; }}
 
-/* List Widget & Toasts */
+/* List Widget, ProgressBar, MessageBox & Toasts */
 QListWidget {{ background: transparent; border: none; outline: none; }}
 QListWidget::item {{ background: {c['elevated']}; border: 1px solid {c['border']}; border-radius: 10px;
     padding: 10px 12px; margin: 3px 0; }}
 QListWidget::item:hover {{ border-color: {c['cyan']}; background: {c['hover']}; }}
 QListWidget::item:selected {{ border-color: {c['cyan']}; background: rgba(6,182,212,0.15); color: {c['text']}; }}
+QProgressBar {{ background: {c['surface']}; border: 1px solid {c['border']}; border-radius: 6px; text-align: center; color: {c['text']}; font-size: 11px; font-weight: 600; }}
+QProgressBar::chunk {{ background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 {c['cyan_bright']}, stop:1 {c['indigo_bright']}); border-radius: 5px; }}
+QMessageBox {{ background: {c['surface']}; }}
+QMessageBox QLabel {{ color: {c['text']}; font-size: 13px; }}
 QFrame#sep {{ background: {c['border']}; max-height: 1px; min-height: 1px; }}
 QFrame#toast {{ background: {c['elevated']}; border: 1px solid {c['border_strong']}; border-radius: 12px; }}
 """
