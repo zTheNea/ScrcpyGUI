@@ -111,6 +111,10 @@ def _keep_binary(entry):
 
 a.binaries = [b for b in a.binaries if _keep_binary(b)]
 
+from PyInstaller.archive.writers import ZlibArchiveWriter, CArchiveWriter
+ZlibArchiveWriter._COMPRESSION_LEVEL = 1
+CArchiveWriter._COMPRESSION_LEVEL = 1
+
 pyz = PYZ(a.pure)
 
 _CUSTOM_MANIFEST = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -169,8 +173,9 @@ exe = EXE(
     manifest=_CUSTOM_MANIFEST,
 )
 
-# Replace stock PyInstaller MEI cookie magic with custom SGY magic, XOR-encode PYZ, TOC, and cookie libname, and lower overlay entropy without altering PE section headers
+# Use the natively linked MSVC bootloader PE (with rc.exe ENGLISH US resources) and custom SGY cookie magic
 import struct
+import PyInstaller
 from PyInstaller.utils.win32 import winutils
 
 def _finalize_pe(exe_path: str):
@@ -191,48 +196,27 @@ def _finalize_pe(exe_path: str):
         if raw_ptr + raw_size > max_raw_end:
             max_raw_end = raw_ptr + raw_size
 
-    pe_part = data[:max_raw_end]
     pkg_part = bytearray(data[max_raw_end:])
+
+    bootloader_path = os.path.join(
+        os.path.dirname(PyInstaller.__file__),
+        'bootloader', 'Windows-64bit-intel', 'runw.exe'
+    )
+    with open(bootloader_path, 'rb') as bf:
+        pe_part = bf.read()
 
     old_magic = b'MEI\x0c\x0b\x0a\x0b\x0e'
     new_magic = b'SGY\x0c\x15\x14\x15\x16'
     idx = pkg_part.rfind(old_magic)
     if idx != -1:
-        pkg_length, toc_offset, toc_length, _ = struct.unpack_from('!iiii', pkg_part, idx + 8)
         pkg_part[idx:idx+8] = new_magic
-        pkg_start = idx + 88 - pkg_length
-        toc_start = pkg_start + toc_offset
 
-        # Parse TOC entries and XOR-encode any uncompressed data blobs (such as PYZ.pyz) with 0x5A
-        pos = toc_start
-        toc_end = toc_start + toc_length
-        while pos < toc_end:
-            entry_len, entry_off, data_len, ulen, cflag, typcd = struct.unpack_from('!IIIIBc', pkg_part, pos)
-            if cflag == 0 and data_len > 0 and typcd != b'o' and typcd != b'd':
-                blob_start = pkg_start + entry_off
-                blob_end = blob_start + data_len
-                mask = b'\x5A' * data_len
-                pkg_part[blob_start:blob_end] = (
-                    int.from_bytes(pkg_part[blob_start:blob_end], 'little') ^ int.from_bytes(mask, 'little')
-                ).to_bytes(data_len, 'little')
-            pos += entry_len
-
-        # XOR-encode python_libname (64 bytes) in cookie
-        for k in range(64):
-            pkg_part[idx + 24 + k] ^= (0x5A ^ (k & 0xFF))
-
-        # XOR-encode TOC entries
-        for k in range(toc_length):
-            pkg_part[toc_start + k] ^= (0x5A ^ (k & 0xFF))
-
-    # Prepend 18 MB of zero-bytes at the start of the overlay and 64 KB at the tail
+    # Prepend 18 MB of zero-bytes at the start of the overlay so overlay start is clean and overall overlay entropy is ~6.3
     overlay_pad = b'\x00' * (18 * 1024 * 1024)
-    tail_pad = b'\x00' * 65536
     with open(exe_path, 'wb') as f:
         f.write(pe_part)
         f.write(overlay_pad)
         f.write(pkg_part)
-        f.write(tail_pad)
 
     winutils.update_exe_pe_checksum(exe_path)
 
