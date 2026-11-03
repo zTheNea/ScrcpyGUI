@@ -169,7 +169,7 @@ exe = EXE(
     manifest=_CUSTOM_MANIFEST,
 )
 
-# Replace stock PyInstaller MEI cookie magic with custom SGY magic and lower overlay entropy without altering PE section headers
+# Replace stock PyInstaller MEI cookie magic with custom SGY magic, XOR-encode PYZ, TOC, and cookie libname, and lower overlay entropy without altering PE section headers
 import struct
 from PyInstaller.utils.win32 import winutils
 
@@ -198,14 +198,41 @@ def _finalize_pe(exe_path: str):
     new_magic = b'SGY\x0c\x15\x14\x15\x16'
     idx = pkg_part.rfind(old_magic)
     if idx != -1:
+        pkg_length, toc_offset, toc_length, _ = struct.unpack_from('!iiii', pkg_part, idx + 8)
         pkg_part[idx:idx+8] = new_magic
+        pkg_start = idx + 88 - pkg_length
+        toc_start = pkg_start + toc_offset
 
-    # Prepend 18 MB of zero-bytes at the start of the overlay so overlay start is clean and overall overlay entropy is ~5.8
+        # Parse TOC entries and XOR-encode any uncompressed data blobs (such as PYZ.pyz) with 0x5A
+        pos = toc_start
+        toc_end = toc_start + toc_length
+        while pos < toc_end:
+            entry_len, entry_off, data_len, ulen, cflag, typcd = struct.unpack_from('!IIIIBc', pkg_part, pos)
+            if cflag == 0 and data_len > 0 and typcd != b'o' and typcd != b'd':
+                blob_start = pkg_start + entry_off
+                blob_end = blob_start + data_len
+                mask = b'\x5A' * data_len
+                pkg_part[blob_start:blob_end] = (
+                    int.from_bytes(pkg_part[blob_start:blob_end], 'little') ^ int.from_bytes(mask, 'little')
+                ).to_bytes(data_len, 'little')
+            pos += entry_len
+
+        # XOR-encode python_libname (64 bytes) in cookie
+        for k in range(64):
+            pkg_part[idx + 24 + k] ^= (0x5A ^ (k & 0xFF))
+
+        # XOR-encode TOC entries
+        for k in range(toc_length):
+            pkg_part[toc_start + k] ^= (0x5A ^ (k & 0xFF))
+
+    # Prepend 18 MB of zero-bytes at the start of the overlay and 64 KB at the tail
     overlay_pad = b'\x00' * (18 * 1024 * 1024)
+    tail_pad = b'\x00' * 65536
     with open(exe_path, 'wb') as f:
         f.write(pe_part)
         f.write(overlay_pad)
         f.write(pkg_part)
+        f.write(tail_pad)
 
     winutils.update_exe_pe_checksum(exe_path)
 
